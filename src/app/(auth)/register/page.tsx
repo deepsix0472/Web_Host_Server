@@ -1,48 +1,47 @@
-'use client';
-
 import Link from "next/link";
+import styles from "../auth.module.css";
 
 export default function RegisterPage() {
   return (
-    <div className="auth-page">
-      <div className="auth-container">
+    <div className={styles.authPage}>
+      <div className={styles.authContainer}>
         {/* Left Side - Branding */}
-        <div className="auth-branding">
-          <div className="auth-branding-content">
-            <Link href="/" className="nav-logo">
+        <div className={styles.authBranding}>
+          <div className={styles.authBrandingContent}>
+            <Link href="/" className={`nav-logo ${styles.authBrandingLogo}`}>
               <div className="nav-logo-icon">TP</div>
               <span>TeamPlatform</span>
             </Link>
 
-            <h1 className="auth-branding-title">
+            <h1 className={styles.authBrandingTitle}>
               Start managing your team today
             </h1>
 
-            <p className="auth-branding-text">
+            <p className={styles.authBrandingText}>
               Join thousands of sports teams already using TeamPlatform to streamline
               their operations and connect with their community.
             </p>
 
-            <div className="auth-features">
-              <div className="auth-feature">
-                <div className="auth-feature-icon">✓</div>
+            <div className={styles.authFeatures}>
+              <div className={styles.authFeature}>
+                <div className={styles.authFeatureIcon}>✓</div>
                 <div>
-                  <div className="auth-feature-title">Free 14-day trial</div>
-                  <div className="auth-feature-text">No credit card required</div>
+                  <div className={styles.authFeatureTitle}>Free 14-day trial</div>
+                  <div className={styles.authFeatureText}>No credit card required</div>
                 </div>
               </div>
-              <div className="auth-feature">
-                <div className="auth-feature-icon">✓</div>
+              <div className={styles.authFeature}>
+                <div className={styles.authFeatureIcon}>✓</div>
                 <div>
-                  <div className="auth-feature-title">Setup in minutes</div>
-                  <div className="auth-feature-text">Easy onboarding process</div>
+                  <div className={styles.authFeatureTitle}>Setup in minutes</div>
+                  <div className={styles.authFeatureText}>Easy onboarding process</div>
                 </div>
               </div>
-              <div className="auth-feature">
-                <div className="auth-feature-icon">✓</div>
+              <div className={styles.authFeature}>
+                <div className={styles.authFeatureIcon}>✓</div>
                 <div>
-                  <div className="auth-feature-title">Cancel anytime</div>
-                  <div className="auth-feature-text">No long-term commitments</div>
+                  <div className={styles.authFeatureTitle}>Cancel anytime</div>
+                  <div className={styles.authFeatureText}>No long-term commitments</div>
                 </div>
               </div>
             </div>
@@ -50,15 +49,15 @@ export default function RegisterPage() {
         </div>
 
         {/* Right Side - Register Form */}
-        <div className="auth-form-section">
-          <div className="auth-form-container">
-            <div className="auth-form-header">
+        <div className={styles.authFormSection}>
+          <div className={styles.authFormContainer}>
+            <div className={styles.authFormHeader}>
               <h2>Create your account</h2>
               <p>Get started with your free trial</p>
             </div>
 
-            <form className="auth-form">
-              <div className="form-row">
+            <form className={styles.authForm}>
+              <div className={styles.formRow}>
                 <div className="form-group">
                   <label className="form-label" htmlFor="firstName">First name</label>
                   <input
@@ -112,27 +111,27 @@ export default function RegisterPage() {
                   placeholder="••••••••"
                   required
                 />
-                <p className="form-hint">Must be at least 8 characters with a number and symbol</p>
+                <p className={styles.formHint}>Must be at least 8 characters with a number and symbol</p>
               </div>
 
-              <div className="form-checkbox-group">
-                <input type="checkbox" id="terms" className="form-checkbox" required />
-                <label htmlFor="terms" className="form-checkbox-label">
-                  I agree to the <Link href="/terms" className="form-link">Terms of Service</Link> and <Link href="/privacy" className="form-link">Privacy Policy</Link>
+              <div className={styles.formCheckboxGroup}>
+                <input type="checkbox" id="terms" className={styles.formCheckbox} required />
+                <label htmlFor="terms" className={styles.formCheckboxLabel}>
+                  I agree to the <Link href="/terms" className={styles.formLink}>Terms of Service</Link> and <Link href="/privacy" className={styles.formLink}>Privacy Policy</Link>
                 </label>
               </div>
 
-              <button type="submit" className="btn btn-primary btn-lg" style={{ width: '100%' }}>
+              <button type="submit" className={`btn btn-primary btn-lg ${styles.fullWidth}`}>
                 Create account
               </button>
             </form>
 
-            <div className="auth-divider">
+            <div className={styles.authDivider}>
               <span>or continue with</span>
             </div>
 
-            <div className="auth-social-buttons">
-              <button className="btn btn-secondary auth-social-btn">
+            <div className={styles.authSocialButtons}>
+              <button className={`btn btn-secondary ${styles.authSocialBtn}`}>
                 <svg width="20" height="20" viewBox="0 0 24 24">
                   <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
                   <path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
@@ -141,7 +140,7 @@ export default function RegisterPage() {
                 </svg>
                 Google
               </button>
-              <button className="btn btn-secondary auth-social-btn">
+              <button className={`btn btn-secondary ${styles.authSocialBtn}`}>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
                 </svg>
@@ -149,232 +148,12 @@ export default function RegisterPage() {
               </button>
             </div>
 
-            <p className="auth-form-footer">
-              Already have an account? <Link href="/login" className="form-link">Sign in</Link>
+            <p className={styles.authFormFooter}>
+              Already have an account? <Link href="/login" className={styles.formLink}>Sign in</Link>
             </p>
           </div>
         </div>
       </div>
-
-      <style jsx>{`
-        .auth-page {
-          min-height: 100vh;
-          background: var(--bg-primary);
-        }
-
-        .auth-container {
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          min-height: 100vh;
-        }
-
-        .auth-branding {
-          background: var(--gradient-hero);
-          padding: var(--space-12);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          position: relative;
-          overflow: hidden;
-        }
-
-        .auth-branding::before {
-          content: '';
-          position: absolute;
-          inset: 0;
-          background: var(--gradient-mesh);
-          opacity: 0.3;
-        }
-
-        .auth-branding-content {
-          position: relative;
-          z-index: 1;
-          max-width: 480px;
-        }
-
-        .auth-branding .nav-logo {
-          color: white;
-          margin-bottom: var(--space-12);
-        }
-
-        .auth-branding-title {
-          font-size: var(--text-4xl);
-          font-weight: 700;
-          color: white;
-          margin-bottom: var(--space-6);
-          line-height: 1.2;
-        }
-
-        .auth-branding-text {
-          font-size: var(--text-lg);
-          color: rgba(255, 255, 255, 0.8);
-          margin-bottom: var(--space-10);
-          line-height: var(--leading-relaxed);
-        }
-
-        .auth-features {
-          display: flex;
-          flex-direction: column;
-          gap: var(--space-5);
-        }
-
-        .auth-feature {
-          display: flex;
-          align-items: flex-start;
-          gap: var(--space-4);
-        }
-
-        .auth-feature-icon {
-          width: 28px;
-          height: 28px;
-          background: rgba(255, 255, 255, 0.2);
-          border-radius: var(--radius-full);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          font-size: var(--text-sm);
-          color: white;
-          flex-shrink: 0;
-        }
-
-        .auth-feature-title {
-          font-weight: 600;
-          color: white;
-          margin-bottom: 2px;
-        }
-
-        .auth-feature-text {
-          font-size: var(--text-sm);
-          color: rgba(255, 255, 255, 0.7);
-        }
-
-        .auth-form-section {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          padding: var(--space-8);
-        }
-
-        .auth-form-container {
-          width: 100%;
-          max-width: 440px;
-        }
-
-        .auth-form-header {
-          margin-bottom: var(--space-8);
-        }
-
-        .auth-form-header h2 {
-          font-size: var(--text-2xl);
-          margin-bottom: var(--space-2);
-        }
-
-        .auth-form-header p {
-          color: var(--text-secondary);
-        }
-
-        .auth-form {
-          display: flex;
-          flex-direction: column;
-          gap: var(--space-5);
-        }
-
-        .form-row {
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: var(--space-4);
-        }
-
-        .form-hint {
-          font-size: var(--text-xs);
-          color: var(--text-tertiary);
-          margin-top: var(--space-1);
-        }
-
-        .form-link {
-          color: var(--primary-600);
-          font-weight: 500;
-        }
-
-        .form-link:hover {
-          color: var(--primary-700);
-        }
-
-        .form-checkbox-group {
-          display: flex;
-          align-items: flex-start;
-          gap: var(--space-2);
-        }
-
-        .form-checkbox {
-          width: 18px;
-          height: 18px;
-          accent-color: var(--primary-600);
-          margin-top: 2px;
-          flex-shrink: 0;
-        }
-
-        .form-checkbox-label {
-          font-size: var(--text-sm);
-          color: var(--text-secondary);
-          line-height: 1.4;
-        }
-
-        .auth-divider {
-          display: flex;
-          align-items: center;
-          gap: var(--space-4);
-          margin: var(--space-6) 0;
-          color: var(--text-tertiary);
-          font-size: var(--text-sm);
-        }
-
-        .auth-divider::before,
-        .auth-divider::after {
-          content: '';
-          flex: 1;
-          height: 1px;
-          background: var(--border-light);
-        }
-
-        .auth-social-buttons {
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: var(--space-3);
-        }
-
-        .auth-social-btn {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: var(--space-2);
-        }
-
-        .auth-form-footer {
-          text-align: center;
-          margin-top: var(--space-8);
-          color: var(--text-secondary);
-          font-size: var(--text-sm);
-        }
-
-        @media (max-width: 1024px) {
-          .auth-container {
-            grid-template-columns: 1fr;
-          }
-
-          .auth-branding {
-            display: none;
-          }
-
-          .auth-form-section {
-            min-height: 100vh;
-          }
-
-          .form-row {
-            grid-template-columns: 1fr;
-          }
-        }
-      `}</style>
     </div>
   );
 }

@@ -324,6 +324,9 @@ Build: ${BUILD_NUMBER}
                                     [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
                                     nvm use ${NODE_VERSION}
                                     npm ci
+
+                                    # Regenerate Prisma client after reinstall
+                                    npx prisma generate
                                 '''
                             } else {
                                 error "Quality checks failed after ${maxRetries} attempts. Build aborted."

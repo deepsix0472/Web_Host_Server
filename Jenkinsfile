@@ -390,10 +390,10 @@ Build: ${BUILD_NUMBER}
                 script {
                     echo "Deploying ${APP_NAME} to web server at ${DEPLOY_HOST}..."
                     
-                    sh '''
+                    sh """
                         # Use agent's existing SSH key
-                        export NVM_DIR="$HOME/.nvm"
-                        [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+                        export NVM_DIR="\$HOME/.nvm"
+                        [ -s "\$NVM_DIR/nvm.sh" ] && . "\$NVM_DIR/nvm.sh"
                         
                         # Add host to known_hosts if not present
                         ssh-keyscan ${DEPLOY_HOST} >> ~/.ssh/known_hosts 2>/dev/null || true
@@ -401,28 +401,28 @@ Build: ${BUILD_NUMBER}
                         echo "Syncing build files to ${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_DIR}..."
                         
                         # Sync built files to web server
-                        rsync -avz --delete \
-                            -e "ssh -o StrictHostKeyChecking=no" \
-                            --exclude 'node_modules' \
-                            --exclude '.git' \
-                            --exclude '.next/cache' \
-                            --exclude '*.log' \
+                        rsync -avz --delete \\
+                            -e "ssh -o StrictHostKeyChecking=no" \\
+                            --exclude 'node_modules' \\
+                            --exclude '.git' \\
+                            --exclude '.next/cache' \\
+                            --exclude '*.log' \\
                             ./ ${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_DIR}/
                         
                         echo "Installing dependencies on web server..."
                         
-                        ssh -o StrictHostKeyChecking=no ${DEPLOY_USER}@${DEPLOY_HOST} "
+                        ssh -o StrictHostKeyChecking=no ${DEPLOY_USER}@${DEPLOY_HOST} '
                             cd ~/Web_Host_Server
-                            export NVM_DIR=\\$HOME/.nvm
-                            [ -s \\$NVM_DIR/nvm.sh ] && . \\$NVM_DIR/nvm.sh
+                            export NVM_DIR="\$HOME/.nvm"
+                            [ -s "\$NVM_DIR/nvm.sh" ] && . "\$NVM_DIR/nvm.sh"
                             npm ci --production || npm install --production
                             if command -v pm2 > /dev/null 2>&1; then
                                 pm2 restart team-platform 2>/dev/null || pm2 start npm --name team-platform -- start
                                 pm2 save
                             fi
-                            echo Deployment completed!
-                        "
-                    '''
+                            echo "Deployment completed!"
+                        '
+                    """
                     
                     echo "Deployment to ${DEPLOY_HOST} completed successfully!"
                 }

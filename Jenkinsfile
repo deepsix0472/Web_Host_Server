@@ -390,59 +390,39 @@ Build: ${BUILD_NUMBER}
                 script {
                     echo "Deploying ${APP_NAME} to web server at ${DEPLOY_HOST}..."
                     
-                    // Deploy using SSH credentials
-                    withCredentials([sshUserPrivateKey(credentialsId: 'webserver-ssh-key', keyFileVariable: 'SSH_KEY')]) {
-                        sh '''
-                            # Setup SSH
-                            mkdir -p ~/.ssh
-                            cp "$SSH_KEY" ~/.ssh/deploy_key
-                            chmod 600 ~/.ssh/deploy_key
-                            ssh-keyscan ${DEPLOY_HOST} >> ~/.ssh/known_hosts 2>/dev/null
-                            
-                            export SSH_CMD="ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no"
-                            export RSYNC_SSH="ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no"
-                            
-                            echo "Syncing build files to ${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_DIR}..."
-                            
-                            # Sync built files to web server (excluding unnecessary files)
-                            rsync -avz --delete \
-                                -e "$RSYNC_SSH" \
-                                --exclude 'node_modules' \
-                                --exclude '.git' \
-                                --exclude '.next/cache' \
-                                --exclude '*.log' \
-                                ./ ${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_DIR}/
-                            
-                            echo "Installing dependencies on web server..."
-                            
-                            # Install production dependencies and restart PM2 on web server
-                            $SSH_CMD ${DEPLOY_USER}@${DEPLOY_HOST} << 'ENDSSH'
-                                cd ${DEPLOY_DIR}
-                                
-                                # Load NVM
-                                export NVM_DIR="$HOME/.nvm"
-                                [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
-                                
-                                # Install production dependencies
-                                npm ci --production
-                                
-                                # Restart application with PM2
-                                if pm2 describe ${PM2_APP_NAME} > /dev/null 2>&1; then
-                                    echo "Restarting existing PM2 process..."
-                                    pm2 restart ${PM2_APP_NAME}
-                                else
-                                    echo "Starting new PM2 process..."
-                                    pm2 start npm --name "${PM2_APP_NAME}" -- start
-                                fi
-                                
+                    sh '''
+                        # Use agent's existing SSH key
+                        export NVM_DIR="$HOME/.nvm"
+                        [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
+                        
+                        # Add host to known_hosts if not present
+                        ssh-keyscan ${DEPLOY_HOST} >> ~/.ssh/known_hosts 2>/dev/null || true
+                        
+                        echo "Syncing build files to ${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_DIR}..."
+                        
+                        # Sync built files to web server
+                        rsync -avz --delete \
+                            -e "ssh -o StrictHostKeyChecking=no" \
+                            --exclude 'node_modules' \
+                            --exclude '.git' \
+                            --exclude '.next/cache' \
+                            --exclude '*.log' \
+                            ./ ${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_DIR}/
+                        
+                        echo "Installing dependencies on web server..."
+                        
+                        ssh -o StrictHostKeyChecking=no ${DEPLOY_USER}@${DEPLOY_HOST} "
+                            cd ~/Web_Host_Server
+                            export NVM_DIR=\\$HOME/.nvm
+                            [ -s \\$NVM_DIR/nvm.sh ] && . \\$NVM_DIR/nvm.sh
+                            npm ci --production || npm install --production
+                            if command -v pm2 > /dev/null 2>&1; then
+                                pm2 restart team-platform 2>/dev/null || pm2 start npm --name team-platform -- start
                                 pm2 save
-                                echo "Deployment completed!"
-ENDSSH
-                            
-                            # Cleanup
-                            rm -f ~/.ssh/deploy_key
-                        '''
-                    }
+                            fi
+                            echo Deployment completed!
+                        "
+                    '''
                     
                     echo "Deployment to ${DEPLOY_HOST} completed successfully!"
                 }

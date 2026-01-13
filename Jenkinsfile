@@ -1,5 +1,5 @@
 pipeline {
-    agent { label 'KVM-VM-Agent' }
+    agent { label 'kvm-vm-agent' }
 
     environment {
         NODE_VERSION = '20'

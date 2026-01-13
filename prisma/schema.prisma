@@ -1,0 +1,81 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// User model for authentication
+model User {
+  id            String       @id @default(cuid())
+  email         String       @unique
+  name          String?
+  password      String
+  role          Role         @default(MEMBER)
+  teams         TeamMember[]
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+}
+
+// Team model
+model Team {
+  id          String       @id @default(cuid())
+  name        String
+  description String?
+  sport       String?
+  members     TeamMember[]
+  events      Event[]
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+}
+
+// Junction table for User-Team relationship
+model TeamMember {
+  id        String   @id @default(cuid())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String
+  team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  teamId    String
+  role      TeamRole @default(MEMBER)
+  joinedAt  DateTime @default(now())
+
+  @@unique([userId, teamId])
+}
+
+// Event model for team schedules
+model Event {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  date        DateTime
+  endDate     DateTime?
+  location    String?
+  type        EventType @default(PRACTICE)
+  team        Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  teamId      String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+enum Role {
+  ADMIN
+  MEMBER
+}
+
+enum TeamRole {
+  OWNER
+  COACH
+  ASSISTANT
+  MEMBER
+}
+
+enum EventType {
+  PRACTICE
+  GAME
+  MEETING
+  OTHER
+}

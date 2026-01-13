@@ -431,9 +431,15 @@ Build: ${BUILD_NUMBER}
 
         stage('Health Check') {
             when {
-                anyOf {
-                    branch 'main'
-                    branch 'master'
+                allOf {
+                    anyOf {
+                        branch 'main'
+                        branch 'master'
+                    }
+                    anyOf {
+                        expression { env.RUN_FRONTEND == 'true' }
+                        expression { params.FORCE_DEPLOY == true }
+                    }
                 }
             }
             steps {

@@ -112,13 +112,22 @@ pipeline {
         stage('Security Scan (Semgrep)') {
             steps {
                 sh '''
+                    # Setup PATH for pipx and local bin
                     export PATH="$HOME/.local/bin:$PATH"
                     
-                    # Install Semgrep if not present
+                    # Install Semgrep using pipx if not present
                     if ! command -v semgrep &> /dev/null; then
-                        pip3 install --user semgrep || pipx install semgrep
+                        echo "Installing Semgrep via pipx..."
+                        # Install pipx if needed
+                        if ! command -v pipx &> /dev/null; then
+                            sudo apt-get update && sudo apt-get install -y pipx
+                            pipx ensurepath
+                        fi
+                        pipx install semgrep
+                        export PATH="$HOME/.local/bin:$PATH"
                     fi
                     
+                    echo "Semgrep version: $(semgrep --version)"
                     echo "Running Semgrep security scan..."
                     semgrep scan --config auto --json --output semgrep-results.json . || true
                     semgrep scan --config auto .

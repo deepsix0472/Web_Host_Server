@@ -105,6 +105,9 @@ pipeline {
                     [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
                     nvm use ${NODE_VERSION}
                     npm ci
+                    
+                    # Generate Prisma client
+                    npx prisma generate
                 '''
             }
         }

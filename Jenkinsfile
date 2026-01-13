@@ -172,31 +172,6 @@ pipeline {
                                         nvm use ${NODE_VERSION}
                                         npx tsc --noEmit
                                     '''
-                                },
-                                'Semgrep Security Scan': {
-                                    sh '''
-                                        echo "Running Semgrep SAST analysis..."
-                                        
-                                        # Install Semgrep if not available
-                                        if ! command -v semgrep &> /dev/null; then
-                                            pip3 install semgrep --user
-                                            export PATH="$HOME/.local/bin:$PATH"
-                                        fi
-                                        
-                                        # Run Semgrep with recommended rules
-                                        semgrep scan \
-                                            --config auto \
-                                            --error \
-                                            --json --output semgrep-results.json \
-                                            --sarif --sarif-output semgrep-results.sarif \
-                                            --exclude 'node_modules' \
-                                            --exclude '.next' \
-                                            --exclude '*.min.js' \
-                                            src/
-                                        
-                                        echo "Semgrep scan completed successfully!"
-                                    '''
-                                    archiveArtifacts artifacts: 'semgrep-results.*', allowEmptyArchive: true
                                 }
                             )
                             

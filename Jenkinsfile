@@ -173,6 +173,10 @@ pipeline {
                                         export NVM_DIR="$HOME/.nvm"
                                         [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
                                         nvm use ${NODE_VERSION}
+                                        
+                                        # Ensure Prisma client is generated
+                                        npx prisma generate
+                                        
                                         npx tsc --noEmit
                                     '''
                                 }

@@ -2,6 +2,7 @@ import { NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import { compare } from "bcryptjs";
 import prisma from "@/lib/prisma";
+import { Role } from "@prisma/client";
 
 export const authOptions: NextAuthOptions = {
     // Note: Credentials provider doesn't use adapter - it uses JWT sessions
@@ -56,7 +57,7 @@ export const authOptions: NextAuthOptions = {
         async session({ session, token }) {
             if (session.user) {
                 session.user.id = token.sub!;
-                session.user.role = token.role as any;
+                session.user.role = token.role as Role;
             }
             return session;
         },

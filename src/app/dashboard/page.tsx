@@ -1,7 +1,11 @@
 import Link from "next/link";
 import styles from "./dashboard.module.css";
+import { requireAuthRedirect } from "@/lib/auth-utils";
+import UserMenu from "@/components/user-menu/user-menu";
 
-export default function DashboardPage() {
+export default async function DashboardPage() {
+  // Require authentication - redirects to /login if not authenticated
+  const user = await requireAuthRedirect();
   return (
     <div className={styles.dashboard}>
       {/* Sidebar */}
@@ -140,13 +144,7 @@ export default function DashboardPage() {
                 <path d="M13.73 21a2 2 0 0 1-3.46 0" />
               </svg>
             </button>
-            <div className={styles.userMenu}>
-              <div className={styles.userAvatar}>JD</div>
-              <div>
-                <div className={styles.userName}>John Doe</div>
-                <div className={styles.userRole}>Admin</div>
-              </div>
-            </div>
+            <UserMenu />
           </div>
         </header>
 

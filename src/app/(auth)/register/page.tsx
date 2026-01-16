@@ -1,7 +1,78 @@
+'use client';
+
 import Link from "next/link";
+import { useState } from "react";
+import { signIn } from "next-auth/react";
+import { useRouter } from "next/navigation";
 import styles from "../auth.module.css";
 
 export default function RegisterPage() {
+  const router = useRouter();
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setIsLoading(true);
+    setError('');
+
+    const formData = new FormData(e.currentTarget);
+    const firstName = formData.get('firstName') as string;
+    const lastName = formData.get('lastName') as string;
+    const email = formData.get('email') as string;
+    const password = formData.get('password') as string;
+    const teamName = formData.get('teamName') as string;
+
+    try {
+      // Step 1: Create user account
+      const createUserRes = await fetch('/api/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email,
+          password,
+          name: `${firstName} ${lastName}`,
+        }),
+      });
+
+      if (!createUserRes.ok) {
+        const data = await createUserRes.json();
+        throw new Error(data.error || 'Failed to create account');
+      }
+
+      // Step 2: Auto-login after registration
+      const signInResult = await signIn('credentials', {
+        email,
+        password,
+        redirect: false,
+      });
+
+      if (signInResult?.error) {
+        throw new Error('Account created but login failed. Please try logging in.');
+      }
+
+      // Step 3: Create team if provided (optional)
+      if (teamName) {
+        await fetch('/api/teams', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: teamName,
+            sport: 'Swimming', // Default sport
+          }),
+        });
+      }
+
+      // Step 4: Redirect to dashboard
+      router.push('/dashboard');
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Something went wrong');
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
   return (
     <div className={styles.authPage}>
       <div className={styles.authContainer}>
@@ -56,16 +127,24 @@ export default function RegisterPage() {
               <p>Get started with your free trial</p>
             </div>
 
-            <form className={styles.authForm}>
+            {error && (
+              <div className={styles.errorMessage}>
+                {error}
+              </div>
+            )}
+
+            <form className={styles.authForm} onSubmit={handleSubmit}>
               <div className={styles.formRow}>
                 <div className="form-group">
                   <label className="form-label" htmlFor="firstName">First name</label>
                   <input
                     type="text"
                     id="firstName"
+                    name="firstName"
                     className="form-input"
                     placeholder="John"
                     required
+                    disabled={isLoading}
                   />
                 </div>
                 <div className="form-group">
@@ -73,9 +152,11 @@ export default function RegisterPage() {
                   <input
                     type="text"
                     id="lastName"
+                    name="lastName"
                     className="form-input"
                     placeholder="Smith"
                     required
+                    disabled={isLoading}
                   />
                 </div>
               </div>
@@ -85,9 +166,11 @@ export default function RegisterPage() {
                 <input
                   type="email"
                   id="email"
+                  name="email"
                   className="form-input"
                   placeholder="you@example.com"
                   required
+                  disabled={isLoading}
                 />
               </div>
 
@@ -96,9 +179,10 @@ export default function RegisterPage() {
                 <input
                   type="text"
                   id="teamName"
+                  name="teamName"
                   className="form-input"
                   placeholder="Aquatic Stars Swim Club"
-                  required
+                  disabled={isLoading}
                 />
               </div>
 
@@ -107,22 +191,35 @@ export default function RegisterPage() {
                 <input
                   type="password"
                   id="password"
+                  name="password"
                   className="form-input"
                   placeholder="••••••••"
                   required
+                  minLength={8}
+                  disabled={isLoading}
                 />
-                <p className={styles.formHint}>Must be at least 8 characters with a number and symbol</p>
+                <p className={styles.formHint}>Must be at least 8 characters</p>
               </div>
 
               <div className={styles.formCheckboxGroup}>
-                <input type="checkbox" id="terms" className={styles.formCheckbox} required />
+                <input
+                  type="checkbox"
+                  id="terms"
+                  className={styles.formCheckbox}
+                  required
+                  disabled={isLoading}
+                />
                 <label htmlFor="terms" className={styles.formCheckboxLabel}>
                   I agree to the <Link href="/terms" className={styles.formLink}>Terms of Service</Link> and <Link href="/privacy" className={styles.formLink}>Privacy Policy</Link>
                 </label>
               </div>
 
-              <button type="submit" className={`btn btn-primary btn-lg ${styles.fullWidth}`}>
-                Create account
+              <button
+                type="submit"
+                className={`btn btn-primary btn-lg ${styles.fullWidth}`}
+                disabled={isLoading}
+              >
+                {isLoading ? 'Creating account...' : 'Create account'}
               </button>
             </form>
 
@@ -131,7 +228,7 @@ export default function RegisterPage() {
             </div>
 
             <div className={styles.authSocialButtons}>
-              <button className={`btn btn-secondary ${styles.authSocialBtn}`}>
+              <button className={`btn btn-secondary ${styles.authSocialBtn}`} disabled={isLoading}>
                 <svg width="20" height="20" viewBox="0 0 24 24">
                   <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
                   <path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
@@ -140,7 +237,7 @@ export default function RegisterPage() {
                 </svg>
                 Google
               </button>
-              <button className={`btn btn-secondary ${styles.authSocialBtn}`}>
+              <button className={`btn btn-secondary ${styles.authSocialBtn}`} disabled={isLoading}>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
                 </svg>

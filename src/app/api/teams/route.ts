@@ -1,10 +1,25 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { getCurrentUser } from '@/lib/auth-utils'
 
-// GET all teams
+// GET teams for authenticated user
 export async function GET() {
     try {
+        const user = await getCurrentUser()
+
+        if (!user) {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+        }
+
+        // Get teams where user is a member
         const teams = await prisma.team.findMany({
+            where: {
+                members: {
+                    some: {
+                        userId: user.id
+                    }
+                }
+            },
             include: {
                 members: {
                     select: {
@@ -34,30 +49,34 @@ export async function GET() {
     }
 }
 
-// POST - Create new team
+// POST - Create new team (requires authentication)
 export async function POST(request: Request) {
     try {
+        const user = await getCurrentUser()
+
+        if (!user) {
+            return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+        }
+
         const body = await request.json()
-        const { name, description, sport, ownerId } = body
+        const { name, description, sport } = body
 
         if (!name) {
             return NextResponse.json({ error: 'Team name is required' }, { status: 400 })
         }
 
+        // Create team with authenticated user as owner
         const team = await prisma.team.create({
             data: {
                 name,
                 description,
                 sport,
-                // If ownerId provided, add owner as first member
-                ...(ownerId && {
-                    members: {
-                        create: {
-                            userId: ownerId,
-                            role: 'OWNER'
-                        }
+                members: {
+                    create: {
+                        userId: user.id,
+                        role: 'OWNER'
                     }
-                })
+                }
             },
             include: {
                 members: {

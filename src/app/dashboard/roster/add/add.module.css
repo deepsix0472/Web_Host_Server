@@ -57,9 +57,9 @@
 }
 
 .errorMessage {
-    background: rgba(239, 68, 68, 0.1);
-    border: 1px solid rgba(239, 68, 68, 0.3);
-    color: #ef4444;
+    background: rgba(239, 68, 68, 0.15);
+    border: 1px solid rgba(239, 68, 68, 0.4);
+    color: #fca5a5;
     padding: 1rem;
     border-radius: 0.5rem;
     margin-bottom: 1.5rem;

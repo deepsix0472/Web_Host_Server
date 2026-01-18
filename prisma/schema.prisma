@@ -155,3 +155,54 @@ model VerificationToken {
 
   @@unique([identifier, token])
 }
+
+// API Key for external integrations (USA Swimming, etc.)
+model ApiKey {
+  id          String    @id @default(cuid())
+  key         String    @unique
+  name        String
+  description String?
+  permissions String[]  // e.g., ['swimmers:read', 'swimmers:write', 'events:read']
+  
+  // Usage tracking
+  lastUsedAt  DateTime?
+  usageCount  Int       @default(0)
+  
+  // Expiration and status
+  expiresAt   DateTime?
+  isActive    Boolean   @default(true)
+  
+  // Owner
+  createdBy   String?
+  
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+}
+
+// Audit log for tracking sensitive actions
+model AuditLog {
+  id         String   @id @default(cuid())
+  action     String   // e.g., 'swimmer.create', 'swimmer.update', 'swimmer.delete'
+  resource   String   // e.g., 'Swimmer', 'Team', 'Event'
+  resourceId String?
+  
+  // User info
+  userId     String?
+  userEmail  String?
+  userRole   String?
+  
+  // Request context
+  ipAddress  String?
+  userAgent  String?
+  
+  // Details
+  details    Json?    // Additional context (old/new values, etc.)
+  status     String   @default("success") // success, failure, error
+  
+  createdAt  DateTime @default(now())
+  
+  @@index([action])
+  @@index([resource])
+  @@index([userId])
+  @@index([createdAt])
+}

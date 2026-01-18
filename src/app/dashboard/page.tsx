@@ -5,7 +5,7 @@ import UserMenu from "@/components/user-menu/user-menu";
 
 export default async function DashboardPage() {
   // Require authentication - redirects to /login if not authenticated
-  const user = await requireAuthRedirect();
+  await requireAuthRedirect();
   return (
     <div className={styles.dashboard}>
       {/* Sidebar */}

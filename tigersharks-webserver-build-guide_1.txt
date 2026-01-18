@@ -1,0 +1,2634 @@
+================================================================================
+TIGER SHARKS SWIM TEAM WEB SERVER BUILD GUIDE
+================================================================================
+Author: David - Crestview Tiger Sharks
+Purpose: Replace Team Unify ($1,800/year) with custom platform
+Hosting: Home-hosted on DMZ VLAN using existing AT&T Fiber (2.5 Gbps)
+Cost Savings: ~$1,750/year
+================================================================================
+
+TABLE OF CONTENTS
+================================================================================
+1. Project Overview & Goals
+2. Infrastructure Architecture
+3. Hardware Requirements
+4. Network Configuration (UniFi)
+5. Cloudflare Tunnel Setup
+6. Server Installation & Configuration
+7. Application Stack
+8. Database Schema
+9. Security Hardening
+10. Backup Strategy
+11. Monitoring & Maintenance
+12. Deployment Checklist
+13. Troubleshooting Guide
+
+================================================================================
+1. PROJECT OVERVIEW & GOALS
+================================================================================
+
+WHAT WE'RE REPLACING:
+- Team Unify subscription: $1,800/year
+- Used ONLY for: Registration/signup forms and basic communication
+- Limited customization, cookie-cutter design
+
+WHAT WE'RE BUILDING:
+- Custom registration system with Stripe payments
+- Fluid, dynamic calendar system
+- Email/SMS communication platform (SendGrid/Twilio)
+- Parent portal for roster/payment management
+- Admin dashboard for team management
+- Complete design control and customization
+
+CORE FEATURES:
+✓ Season registration with digital waivers
+✓ Stripe payment processing
+✓ Dynamic calendar (practices, events, deadlines)
+✓ Email/SMS notifications
+✓ Parent/swimmer profiles
+✓ Document management
+✓ Payment tracking (integrates with bank ledger app)
+✓ Admin dashboard
+
+TECHNOLOGY STACK:
+- Frontend: Flutter Web (responsive, can become mobile app later)
+- Backend: Dart with shelf framework
+- Database: PostgreSQL 15
+- Reverse Proxy: Nginx
+- Caching: Redis (optional)
+- Containerization: Docker + Docker Compose
+- Tunnel: Cloudflare Tunnel (cloudflared)
+
+ANNUAL COSTS:
+- Infrastructure: $0 (existing home hardware)
+- Domain: $12/year (swimcts.org - already owned)
+- Email: $0/year (SendGrid free tier - 100/day)
+- SMS: $30/year (Twilio - ~3 urgent messages/month)
+- Stripe fees: 2.9% + $0.30 per transaction
+- Electricity: ~$20/year (minimal increase)
+- Total: ~$62/year + Stripe fees vs $1,800/year
+
+================================================================================
+2. INFRASTRUCTURE ARCHITECTURE
+================================================================================
+
+NETWORK TOPOLOGY:
+
+Internet
+    ↓
+AT&T Fiber (2.5 Gbps symmetric)
+    ↓
+Cloudflare (DDoS protection, CDN, SSL termination)
+    ↓
+Cloudflare Tunnel (encrypted, no port forwarding needed)
+    ↓
+UniFi Gateway/Dream Machine
+    ├── VLAN 10: Management (Master-Control, admin access)
+    ├── VLAN 20: Personal Services (Nextcloud, Jellyfin, etc.)
+    ├── VLAN 30: DMZ - Tiger Sharks (ISOLATED) ← New
+    │   └── Docker Host / VM
+    │       ├── Nginx (reverse proxy, SSL termination)
+    │       ├── Flutter Web (static files)
+    │       ├── Dart API Server (backend logic)
+    │       ├── PostgreSQL (database)
+    │       └── Redis (optional caching)
+    └── VLAN 40+: Other network segments
+
+ISOLATION STRATEGY:
+- Tiger Sharks in dedicated VLAN 30 (complete isolation)
+- Firewall rules prevent DMZ → internal network access
+- Only Management VLAN can SSH to DMZ
+- DMZ can only reach Internet for API calls (Stripe, SendGrid, Twilio)
+- If compromised, attacker cannot reach personal services or home network
+
+DATA FLOW:
+1. User visits swimcts.org
+2. DNS resolves to Cloudflare
+3. Cloudflare Tunnel connects to home server (DMZ VLAN 30)
+4. Nginx serves static files or proxies to API
+5. API queries PostgreSQL, calls external services
+6. Response returns through tunnel to Cloudflare to user
+
+BENEFITS OF HOME HOSTING:
+✓ Complete physical control
+✓ No monthly VPS costs
+✓ 2.5 Gbps symmetric fiber (62x more than needed)
+✓ Easy integration with existing infrastructure
+✓ Direct access for debugging/maintenance
+✓ Backup to existing Nextcloud on VLAN 20
+
+================================================================================
+3. HARDWARE REQUIREMENTS
+================================================================================
+
+MINIMUM SPECS (Will Work):
+- CPU: 2 cores @ 2.0 GHz
+- RAM: 2 GB
+- Storage: 32 GB SSD
+- Network: 1 Gbps NIC
+
+RECOMMENDED SPECS (Comfortable):
+- CPU: 4 cores @ 2.5 GHz
+- RAM: 4-8 GB
+- Storage: 64-128 GB SSD
+- Network: 1 Gbps NIC
+
+RESOURCE ALLOCATION (for 50 families):
+- PostgreSQL: ~1 GB RAM
+- Dart API: ~400 MB RAM (1 GB at peak)
+- Nginx: ~150 MB RAM
+- Redis: ~250 MB RAM
+- Cloudflared: ~100 MB RAM
+- Total: ~2-3 GB RAM typical, 4 GB at peak
+
+STORAGE BREAKDOWN:
+- OS (Debian/Ubuntu): 5-10 GB
+- PostgreSQL database: 0.5-1 GB (5 years of data)
+- Application: 0.5 GB
+- Nginx + static files: 0.1 GB
+- Docker images: 2-5 GB
+- Logs: 1-5 GB
+- Local backups: 2-10 GB
+- Recommended total: 64-128 GB SSD
+
+DEPLOYMENT OPTIONS:
+
+Option A: VM on Master-Control (RECOMMENDED)
+- Allocate: 4 vCPUs, 8 GB RAM, 64 GB storage
+- Hypervisor: Proxmox, ESXi, or VirtualBox
+- OS: Debian 12 or Ubuntu 24.04 LTS
+- Network: Bridge to DMZ VLAN 30
+- Cost: $0 (uses existing hardware)
+- Pros: Easy snapshots, proper isolation, adjustable resources
+- Cons: Requires existing server with spare capacity
+
+Option B: Docker Container on Master-Control
+- Install Docker on Master-Control
+- docker-compose.yml manages all services
+- Network: Assign to DMZ VLAN 30
+- Cost: $0
+- Pros: Minimal overhead, easy deployment, portable
+- Cons: Less isolation than VM (still good with VLAN)
+
+Option C: Dedicated Mini PC
+- Dell OptiPlex Micro, Beelink, Intel NUC
+- Cost: $150-400 (used to new)
+- Power: 10-25W (~$25-65/year electricity)
+- Pros: Complete physical isolation, dedicated resources
+- Cons: Additional hardware cost, more power consumption
+
+RECOMMENDATION:
+Use VM on Master-Control if available capacity exists.
+Check current usage: htop, free -h, df -h
+
+================================================================================
+4. NETWORK CONFIGURATION (UniFi)
+================================================================================
+
+VLAN 30 SETUP (DMZ - Tiger Sharks):
+
+UniFi Controller → Settings → Networks → Create New Network
+- Name: DMZ_TigerSharks
+- Purpose: Corporate
+- VLAN ID: 30
+- Gateway/Subnet: 192.168.30.1/24
+- DHCP Range: 192.168.30.10 - 192.168.30.250
+- DHCP DNS: 1.1.1.1, 1.0.0.1 (Cloudflare DNS)
+- IGMP Snooping: Disabled
+- Multicast DNS: Disabled
+- Domain Name: tigersharks.local (optional)
+
+STATIC IP FOR SERVER (recommended):
+- IP: 192.168.30.10
+- Reserve in DHCP or configure static on server
+
+FIREWALL RULES:
+
+UniFi Controller → Settings → Firewall & Security → Rules
+
+Rule 1: Block DMZ to Internal Networks (LAN IN)
+- Name: Block_DMZ_to_Internal
+- Rule Applied: Before Predefined Rules
+- Action: Drop
+- Protocol: All
+- Source: Network = DMZ_TigerSharks (VLAN 30)
+- Destination: Address/Port Group = RFC1918 (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16)
+- Logging: Enabled (for security monitoring)
+- State: Enabled
+
+Rule 2: Allow Management to DMZ SSH (LAN IN)
+- Name: Allow_Mgmt_to_DMZ_SSH
+- Rule Applied: Before Predefined Rules
+- Action: Accept
+- Protocol: TCP
+- Source: Network = Management_VLAN (VLAN 10)
+- Destination: Network = DMZ_TigerSharks, Port = 22
+- State: Enabled
+
+Rule 3: Allow DMZ to Internet (LAN OUT)
+- Name: Allow_DMZ_to_Internet
+- Action: Accept
+- Protocol: All
+- Source: Network = DMZ_TigerSharks
+- Destination: Internet
+- State: Enabled
+- Purpose: API calls to Stripe, SendGrid, Twilio, Weather API
+
+Rule 4: Drop All Other DMZ Traffic (LAN IN)
+- Name: Drop_DMZ_All_Other
+- Action: Drop
+- Protocol: All
+- Source: Network = DMZ_TigerSharks
+- Destination: Any
+- Logging: Enabled
+- State: Enabled
+
+WAN RULES (Optional - Cloudflare Tunnel handles inbound):
+No WAN rules needed if using Cloudflare Tunnel.
+If exposing directly (NOT recommended):
+- Allow WAN → DMZ on ports 80, 443 only
+- Rate limiting enabled
+
+IDS/IPS CONFIGURATION:
+
+UniFi Threat Management (if available):
+- Enable IPS on WAN interface
+- Enable IDS monitoring on DMZ VLAN
+- Categories: All
+- Geo-blocking: Optional (block high-risk countries)
+
+DPI (Deep Packet Inspection):
+- Enable for traffic visibility
+- Monitor DMZ VLAN 30 for anomalies
+
+BANDWIDTH LIMITS (Optional):
+- Not needed with 2.5 Gbps fiber
+- Can set if you want to guarantee bandwidth for other services
+
+TESTING FIREWALL RULES:
+
+From DMZ server (192.168.30.10):
+# Should FAIL (blocked by firewall):
+ping 192.168.10.1 (Management VLAN)
+ping 192.168.20.1 (Personal Services VLAN)
+
+# Should SUCCEED:
+ping 1.1.1.1 (Internet)
+ping 8.8.8.8 (Internet)
+curl https://api.stripe.com (API access)
+
+From Management VLAN:
+# Should SUCCEED:
+ssh user@192.168.30.10
+
+MONITORING:
+- UniFi Controller → Statistics → DPI
+- Check traffic patterns on VLAN 30
+- Watch for unexpected connections
+
+================================================================================
+5. CLOUDFLARE TUNNEL SETUP
+================================================================================
+
+WHY CLOUDFLARE TUNNEL:
+✓ No port forwarding needed (bypasses ISP restrictions)
+✓ Works with dynamic IP (no static IP required)
+✓ Encrypted tunnel to Cloudflare
+✓ Built-in DDoS protection
+✓ Free SSL/TLS certificates
+✓ Hides your home IP address
+✓ No exposed attack surface
+
+PREREQUISITES:
+- Cloudflare account (free tier is fine)
+- Domain registered and using Cloudflare DNS (swimcts.org)
+- Server/VM accessible on DMZ VLAN 30
+
+INSTALLATION (on DMZ server):
+
+# Download cloudflared for Linux x86_64
+curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o cloudflared.deb
+
+# Install
+sudo dpkg -i cloudflared.deb
+
+# Verify installation
+cloudflared --version
+
+AUTHENTICATION:
+
+# Login to Cloudflare (opens browser for auth)
+cloudflared tunnel login
+
+# This downloads a certificate to:
+# ~/.cloudflared/cert.pem
+
+CREATE TUNNEL:
+
+# Create named tunnel
+cloudflared tunnel create tigersharks
+
+# Output:
+# Created tunnel tigersharks with id: <TUNNEL_ID>
+# Credentials file: ~/.cloudflared/<TUNNEL_ID>.json
+
+# Save TUNNEL_ID for configuration
+
+CONFIGURE TUNNEL:
+
+Create config file:
+sudo mkdir -p /etc/cloudflared
+sudo nano /etc/cloudflared/config.yml
+
+Config contents:
+---
+tunnel: <TUNNEL_ID>
+credentials-file: /root/.cloudflared/<TUNNEL_ID>.json
+
+ingress:
+  # Route swimcts.org to local Nginx
+  - hostname: swimcts.org
+    service: http://localhost:80
+  
+  # Route www.swimcts.org to local Nginx
+  - hostname: www.swimcts.org
+    service: http://localhost:80
+  
+  # Optional: API subdomain
+  # - hostname: api.swimcts.org
+  #   service: http://localhost:8080
+  
+  # Optional: Admin subdomain
+  # - hostname: admin.swimcts.org
+  #   service: http://localhost:80
+  #   originRequest:
+  #     noTLSVerify: true
+  
+  # Catch-all (required, returns 404 for unknown hosts)
+  - service: http_status:404
+
+ROUTE DNS:
+
+# Point DNS to tunnel
+cloudflared tunnel route dns tigersharks swimcts.org
+cloudflared tunnel route dns tigersharks www.swimcts.org
+
+# Verify in Cloudflare dashboard:
+# DNS → Records should show:
+# CNAME swimcts.org → <TUNNEL_ID>.cfargotunnel.com
+# CNAME www → <TUNNEL_ID>.cfargotunnel.com
+
+INSTALL AS SYSTEM SERVICE:
+
+# Install service
+sudo cloudflared service install
+
+# Start service
+sudo systemctl start cloudflared
+
+# Enable on boot
+sudo systemctl enable cloudflared
+
+# Check status
+sudo systemctl status cloudflared
+
+# View logs
+sudo journalctl -u cloudflared -f
+
+TESTING:
+
+# From outside your network (phone on cellular):
+curl -I https://swimcts.org
+
+# Should return:
+# HTTP/2 200
+# server: cloudflare
+# ...
+
+# Check tunnel status in Cloudflare dashboard:
+# Zero Trust → Access → Tunnels → tigersharks
+# Status should be "Healthy"
+
+CLOUDFLARE DASHBOARD CONFIGURATION:
+
+SSL/TLS Settings:
+- Mode: Full (strict) - requires valid SSL on origin (Nginx)
+- Or: Flexible - if no SSL on Nginx (not recommended)
+- Minimum TLS Version: 1.2
+- Automatic HTTPS Rewrites: On
+- Always Use HTTPS: On
+
+Caching:
+- Caching Level: Standard
+- Browser Cache TTL: 4 hours
+
+Page Rules (3 free):
+Rule 1: Cache static assets
+- URL: swimcts.org/assets/*
+- Settings: Cache Level = Cache Everything, Edge Cache TTL = 1 month
+
+Rule 2: Always use HTTPS
+- URL: http://swimcts.org/*
+- Settings: Always Use HTTPS
+
+Rule 3: Bypass cache for API
+- URL: swimcts.org/api/*
+- Settings: Cache Level = Bypass
+
+Speed Optimizations:
+- Auto Minify: CSS, JavaScript, HTML all enabled
+- Brotli: Enabled
+- Rocket Loader: Disabled (can break Flutter)
+- HTTP/2 to Origin: Enabled
+
+Security:
+- Security Level: Medium
+- Challenge Passage: 30 minutes
+- Browser Integrity Check: On
+- Firewall Rules: Optional (block known bad IPs)
+
+TROUBLESHOOTING:
+
+Tunnel won't start:
+- Check credentials file exists and has correct permissions
+- Verify tunnel ID in config.yml matches created tunnel
+- Check logs: journalctl -u cloudflared -f
+
+Can't reach site:
+- Verify DNS records in Cloudflare point to tunnel
+- Check tunnel status: cloudflared tunnel info tigersharks
+- Verify Nginx is running on port 80
+- Check firewall allows Cloudflare IPs
+
+502 Bad Gateway:
+- Nginx is down or misconfigured
+- Check: systemctl status nginx
+- Verify service URL in config.yml is correct
+
+UPDATING CLOUDFLARED:
+
+# Download latest version
+curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o cloudflared.deb
+
+# Reinstall
+sudo dpkg -i cloudflared.deb
+
+# Restart service
+sudo systemctl restart cloudflared
+
+================================================================================
+6. SERVER INSTALLATION & CONFIGURATION
+================================================================================
+
+BASE OS INSTALLATION:
+
+Recommended: Debian 12 (Bookworm) or Ubuntu 24.04 LTS
+
+Download ISO:
+- Debian: https://www.debian.org/download
+- Ubuntu Server: https://ubuntu.com/download/server
+
+VM Creation (if using hypervisor):
+- Name: tigersharks-prod
+- OS: Debian 12 / Ubuntu 24.04
+- CPUs: 4 vCPUs
+- RAM: 8192 MB
+- Disk: 64 GB (thin provisioned)
+- Network: Bridge to DMZ VLAN 30
+
+Installation steps:
+- Hostname: tigersharks
+- Domain: tigersharks.local (or leave blank)
+- Root password: (strong password)
+- Create user: tigersharks (or your preference)
+- Partition: Use entire disk, LVM
+- Software selection: SSH server, Standard system utilities
+- Install GRUB: Yes
+
+INITIAL CONFIGURATION:
+
+# Update system
+sudo apt update && sudo apt upgrade -y
+
+# Install essential tools
+sudo apt install -y curl wget git vim htop net-tools ufw fail2ban
+
+# Set timezone
+sudo timedatectl set-timezone America/Chicago
+
+# Set static IP (if not using DHCP reservation)
+sudo nano /etc/network/interfaces
+# Or for Ubuntu with netplan:
+sudo nano /etc/netplan/00-installer-config.yaml
+
+Example netplan (Ubuntu):
+---
+network:
+  version: 2
+  ethernets:
+    ens18:  # or your interface name
+      addresses:
+        - 192.168.30.10/24
+      gateway4: 192.168.30.1
+      nameservers:
+        addresses:
+          - 1.1.1.1
+          - 1.0.0.1
+
+# Apply network config
+sudo netplan apply
+
+SSH HARDENING:
+
+# Generate SSH key on your management machine
+ssh-keygen -t ed25519 -C "tigersharks-admin"
+
+# Copy public key to server
+ssh-copy-id tigersharks@192.168.30.10
+
+# Edit SSH config
+sudo nano /etc/ssh/sshd_config
+
+Changes:
+PermitRootLogin no
+PasswordAuthentication no
+PubkeyAuthentication yes
+Port 22  # Can change to non-standard port if desired
+AllowUsers tigersharks  # Only allow specific user
+
+# Restart SSH
+sudo systemctl restart sshd
+
+FIREWALL (UFW):
+
+# Default policies
+sudo ufw default deny incoming
+sudo ufw default allow outgoing
+
+# Allow SSH from Management VLAN only (optional, handled by UniFi)
+sudo ufw allow from 192.168.10.0/24 to any port 22
+
+# Allow HTTP/HTTPS (for Cloudflare Tunnel to connect to Nginx)
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+
+# Enable firewall
+sudo ufw enable
+
+# Check status
+sudo ufw status verbose
+
+FAIL2BAN (SSH brute force protection):
+
+# Install
+sudo apt install -y fail2ban
+
+# Create local config
+sudo cp /etc/fail2ban/jail.conf /etc/fail2ban/jail.local
+sudo nano /etc/fail2ban/jail.local
+
+Changes:
+[sshd]
+enabled = true
+port = 22
+maxretry = 3
+findtime = 600
+bantime = 3600
+
+# Restart fail2ban
+sudo systemctl restart fail2ban
+
+# Check status
+sudo fail2ban-client status sshd
+
+DOCKER INSTALLATION:
+
+# Install prerequisites
+sudo apt install -y apt-transport-https ca-certificates curl gnupg lsb-release
+
+# Add Docker GPG key
+curl -fsSL https://download.docker.com/linux/debian/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+
+# Add Docker repository (Debian)
+echo "deb [arch=amd64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/debian $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+# For Ubuntu, replace 'debian' with 'ubuntu' in the above command
+
+# Update and install Docker
+sudo apt update
+sudo apt install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+
+# Add user to docker group
+sudo usermod -aG docker $USER
+
+# Log out and back in for group change to take effect
+
+# Verify installation
+docker --version
+docker compose version
+
+# Test Docker
+docker run hello-world
+
+DOCKER COMPOSE INSTALLATION:
+
+# Already included with docker-compose-plugin
+# Verify with:
+docker compose version
+
+# Should show: Docker Compose version v2.x.x
+
+DIRECTORY STRUCTURE:
+
+# Create project directory
+sudo mkdir -p /opt/tigersharks
+sudo chown $USER:$USER /opt/tigersharks
+cd /opt/tigersharks
+
+# Create subdirectories
+mkdir -p {frontend,backend,nginx,postgres,backups,logs}
+
+# Project structure:
+/opt/tigersharks/
+├── docker-compose.yml
+├── .env
+├── frontend/
+│   └── (Flutter web build files)
+├── backend/
+│   ├── Dockerfile
+│   └── (Dart application)
+├── nginx/
+│   └── nginx.conf
+├── postgres/
+│   └── init.sql
+├── backups/
+│   └── (automated database backups)
+└── logs/
+    ├── nginx/
+    ├── api/
+    └── postgres/
+
+SYSTEM MONITORING:
+
+# Install monitoring tools
+sudo apt install -y sysstat iotop iftop nethogs
+
+# Enable sysstat
+sudo systemctl enable sysstat
+sudo systemctl start sysstat
+
+# View system stats
+sar -u  # CPU
+sar -r  # Memory
+sar -n DEV  # Network
+
+================================================================================
+7. APPLICATION STACK
+================================================================================
+
+DOCKER COMPOSE CONFIGURATION:
+
+Create /opt/tigersharks/docker-compose.yml:
+
+---
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: tigersharks_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ./backups:/backups
+    ports:
+      - "127.0.0.1:5432:5432"  # Only accessible from localhost
+    networks:
+      - tigersharks_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Cache (optional)
+  redis:
+    image: redis:7-alpine
+    container_name: tigersharks_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "127.0.0.1:6379:6379"
+    networks:
+      - tigersharks_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Dart API Backend
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: tigersharks_api
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      REDIS_URL: redis://redis:6379
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}
+      SENDGRID_API_KEY: ${SENDGRID_API_KEY}
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN}
+      TWILIO_PHONE_NUMBER: ${TWILIO_PHONE_NUMBER}
+      JWT_SECRET: ${JWT_SECRET}
+      ENVIRONMENT: production
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8080:8080"
+    networks:
+      - tigersharks_net
+    volumes:
+      - ./logs/api:/app/logs
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Nginx Reverse Proxy
+  nginx:
+    image: nginx:alpine
+    container_name: tigersharks_nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./frontend/build/web:/usr/share/nginx/html:ro
+      - ./logs/nginx:/var/log/nginx
+      - ssl_certs:/etc/nginx/ssl:ro
+    depends_on:
+      - api
+    networks:
+      - tigersharks_net
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  tigersharks_net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  ssl_certs:
+
+ENVIRONMENT VARIABLES:
+
+Create /opt/tigersharks/.env:
+
+# Database
+POSTGRES_DB=tigersharks
+POSTGRES_USER=tigersharks_user
+POSTGRES_PASSWORD=<GENERATE_STRONG_PASSWORD>
+
+# Stripe (get from https://dashboard.stripe.com/apikeys)
+STRIPE_SECRET_KEY=sk_live_XXXXX  # Use sk_test_XXXXX for testing
+STRIPE_WEBHOOK_SECRET=whsec_XXXXX
+
+# SendGrid (get from https://app.sendgrid.com/settings/api_keys)
+SENDGRID_API_KEY=SG.XXXXX
+
+# Twilio (get from https://console.twilio.com/)
+TWILIO_ACCOUNT_SID=ACXXXXX
+TWILIO_AUTH_TOKEN=XXXXX
+TWILIO_PHONE_NUMBER=+1XXXXXXXXXX
+
+# Security
+JWT_SECRET=<GENERATE_RANDOM_STRING>
+
+# Generate strong passwords:
+# openssl rand -base64 32
+
+IMPORTANT: 
+chmod 600 /opt/tigersharks/.env
+Never commit .env to git
+
+NGINX CONFIGURATION:
+
+Create /opt/tigersharks/nginx/nginx.conf:
+
+user nginx;
+worker_processes auto;
+error_log /var/log/nginx/error.log warn;
+pid /var/run/nginx.pid;
+
+events {
+    worker_connections 1024;
+}
+
+http {
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+
+    log_format main '$remote_addr - $remote_user [$time_local] "$request" '
+                    '$status $body_bytes_sent "$http_referer" '
+                    '"$http_user_agent" "$http_x_forwarded_for"';
+
+    access_log /var/log/nginx/access.log main;
+
+    sendfile on;
+    tcp_nopush on;
+    tcp_nodelay on;
+    keepalive_timeout 65;
+    types_hash_max_size 2048;
+    client_max_body_size 10M;
+
+    # Gzip compression
+    gzip on;
+    gzip_vary on;
+    gzip_proxied any;
+    gzip_comp_level 6;
+    gzip_types text/plain text/css text/xml text/javascript 
+               application/json application/javascript application/xml+rss 
+               application/rss+xml font/truetype font/opentype 
+               application/vnd.ms-fontobject image/svg+xml;
+
+    # Rate limiting
+    limit_req_zone $binary_remote_addr zone=api_limit:10m rate=10r/s;
+    limit_req_zone $binary_remote_addr zone=login_limit:10m rate=5r/m;
+
+    # Real IP from Cloudflare
+    set_real_ip_from 103.21.244.0/22;
+    set_real_ip_from 103.22.200.0/22;
+    set_real_ip_from 103.31.4.0/22;
+    set_real_ip_from 104.16.0.0/13;
+    set_real_ip_from 104.24.0.0/14;
+    set_real_ip_from 108.162.192.0/18;
+    set_real_ip_from 131.0.72.0/22;
+    set_real_ip_from 141.101.64.0/18;
+    set_real_ip_from 162.158.0.0/15;
+    set_real_ip_from 172.64.0.0/13;
+    set_real_ip_from 173.245.48.0/20;
+    set_real_ip_from 188.114.96.0/20;
+    set_real_ip_from 190.93.240.0/20;
+    set_real_ip_from 197.234.240.0/22;
+    set_real_ip_from 198.41.128.0/17;
+    set_real_ip_from 2400:cb00::/32;
+    set_real_ip_from 2606:4700::/32;
+    set_real_ip_from 2803:f800::/32;
+    set_real_ip_from 2405:b500::/32;
+    set_real_ip_from 2405:8100::/32;
+    set_real_ip_from 2a06:98c0::/29;
+    set_real_ip_from 2c0f:f248::/32;
+    real_ip_header CF-Connecting-IP;
+
+    upstream api_backend {
+        server api:8080;
+    }
+
+    server {
+        listen 80;
+        server_name swimcts.org www.swimcts.org;
+
+        # Health check endpoint
+        location /health {
+            access_log off;
+            return 200 "healthy\n";
+            add_header Content-Type text/plain;
+        }
+
+        # API endpoints
+        location /api/ {
+            limit_req zone=api_limit burst=20 nodelay;
+            
+            proxy_pass http://api_backend/;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection 'upgrade';
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_cache_bypass $http_upgrade;
+            
+            # Timeouts
+            proxy_connect_timeout 60s;
+            proxy_send_timeout 60s;
+            proxy_read_timeout 60s;
+        }
+
+        # Stripe webhooks (separate rate limit)
+        location /webhooks/stripe {
+            limit_req zone=api_limit burst=5;
+            
+            proxy_pass http://api_backend/webhooks/stripe;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            
+            client_max_body_size 1M;
+        }
+
+        # Auth endpoints (stricter rate limit)
+        location /api/auth/ {
+            limit_req zone=login_limit burst=5 nodelay;
+            
+            proxy_pass http://api_backend/auth/;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        }
+
+        # Static files (Flutter Web)
+        location / {
+            root /usr/share/nginx/html;
+            try_files $uri $uri/ /index.html;
+            
+            # Cache static assets
+            location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
+                expires 1y;
+                add_header Cache-Control "public, immutable";
+            }
+            
+            # Don't cache HTML (for updates)
+            location ~* \.html$ {
+                expires -1;
+                add_header Cache-Control "no-cache, no-store, must-revalidate";
+            }
+        }
+
+        # Security headers
+        add_header X-Frame-Options "SAMEORIGIN" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-XSS-Protection "1; mode=block" always;
+        add_header Referrer-Policy "no-referrer-when-downgrade" always;
+    }
+}
+
+DART BACKEND DOCKERFILE:
+
+Create /opt/tigersharks/backend/Dockerfile:
+
+FROM dart:stable AS build
+
+WORKDIR /app
+
+# Copy pubspec files
+COPY pubspec.* ./
+
+# Get dependencies
+RUN dart pub get
+
+# Copy source code
+COPY . .
+
+# Compile to native
+RUN dart compile exe bin/server.dart -o bin/server
+
+# Production image
+FROM debian:bookworm-slim
+
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create app user
+RUN useradd -m -s /bin/bash appuser
+
+WORKDIR /app
+
+# Copy compiled binary
+COPY --from=build /app/bin/server /app/server
+
+# Copy any static files if needed
+# COPY --from=build /app/config /app/config
+
+# Set ownership
+RUN chown -R appuser:appuser /app
+
+USER appuser
+
+EXPOSE 8080
+
+CMD ["/app/server"]
+
+BUILDING AND DEPLOYING:
+
+# Build and start all services
+cd /opt/tigersharks
+docker compose up -d
+
+# View logs
+docker compose logs -f
+
+# Check status
+docker compose ps
+
+# Restart specific service
+docker compose restart api
+
+# Stop all services
+docker compose down
+
+# Rebuild after code changes
+docker compose up -d --build
+
+# View resource usage
+docker stats
+
+DATABASE MIGRATIONS:
+
+Create /opt/tigersharks/postgres/init.sql (see Database Schema section)
+
+# Run migrations on existing database
+docker exec -i tigersharks_db psql -U tigersharks_user -d tigersharks < migration.sql
+
+HEALTH CHECKS:
+
+# Check API health
+curl http://localhost:8080/health
+
+# Check database
+docker exec tigersharks_db pg_isready -U tigersharks_user
+
+# Check Redis
+docker exec tigersharks_redis redis-cli ping
+
+# Check Nginx
+curl -I http://localhost/health
+
+# Check from internet (after Cloudflare Tunnel setup)
+curl -I https://swimcts.org
+
+================================================================================
+8. DATABASE SCHEMA
+================================================================================
+
+PostgreSQL Database: tigersharks
+
+Create /opt/tigersharks/postgres/init.sql:
+
+-- Enable UUID extension
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+-- Families table (parent/guardian accounts)
+CREATE TABLE families (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    parent_first_name VARCHAR(100) NOT NULL,
+    parent_last_name VARCHAR(100) NOT NULL,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    phone VARCHAR(20) NOT NULL,
+    address_line1 VARCHAR(255),
+    address_line2 VARCHAR(255),
+    city VARCHAR(100),
+    state VARCHAR(2),
+    zip VARCHAR(10),
+    emergency_contact_name VARCHAR(200),
+    emergency_contact_phone VARCHAR(20),
+    emergency_contact_relation VARCHAR(50),
+    password_hash VARCHAR(255) NOT NULL,
+    email_verified BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Swimmers table
+CREATE TABLE swimmers (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    family_id UUID REFERENCES families(id) ON DELETE CASCADE,
+    first_name VARCHAR(100) NOT NULL,
+    last_name VARCHAR(100) NOT NULL,
+    date_of_birth DATE NOT NULL,
+    gender VARCHAR(10),
+    grade INTEGER,
+    medical_notes TEXT,
+    allergies TEXT,
+    shirt_size VARCHAR(10),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Registrations table
+CREATE TABLE registrations (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    family_id UUID REFERENCES families(id) ON DELETE CASCADE,
+    season VARCHAR(10) NOT NULL,  -- e.g., "2026", "2027"
+    registration_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    payment_status VARCHAR(20) DEFAULT 'pending',  -- pending, paid, refunded
+    amount_due DECIMAL(10,2),
+    amount_paid DECIMAL(10,2) DEFAULT 0.00,
+    waiver_accepted BOOLEAN DEFAULT FALSE,
+    waiver_accepted_at TIMESTAMP,
+    notes TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(family_id, season)
+);
+
+-- Payments table
+CREATE TABLE payments (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    family_id UUID REFERENCES families(id) ON DELETE CASCADE,
+    registration_id UUID REFERENCES registrations(id) ON DELETE SET NULL,
+    amount DECIMAL(10,2) NOT NULL,
+    stripe_payment_intent_id VARCHAR(255) UNIQUE,
+    stripe_charge_id VARCHAR(255),
+    payment_method VARCHAR(50),  -- card, bank_transfer, cash, check
+    status VARCHAR(20) DEFAULT 'pending',  -- pending, succeeded, failed, refunded
+    description TEXT,
+    payment_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Events table (calendar - practices, meets, team events)
+CREATE TABLE events (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    title VARCHAR(255) NOT NULL,
+    description TEXT,
+    event_type VARCHAR(50) NOT NULL,  -- practice, team_event, deadline, cancellation, social
+    start_datetime TIMESTAMP NOT NULL,
+    end_datetime TIMESTAMP,
+    location VARCHAR(255),
+    recurring BOOLEAN DEFAULT FALSE,
+    recurrence_rule TEXT,  -- RRULE format for recurring events
+    parent_event_id UUID REFERENCES events(id) ON DELETE CASCADE,  -- For recurring event instances
+    canceled BOOLEAN DEFAULT FALSE,
+    cancel_reason TEXT,
+    weather_dependent BOOLEAN DEFAULT FALSE,
+    created_by UUID REFERENCES families(id),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Event RSVPs (for optional events, not required practices)
+CREATE TABLE event_rsvps (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    event_id UUID REFERENCES events(id) ON DELETE CASCADE,
+    family_id UUID REFERENCES families(id) ON DELETE CASCADE,
+    rsvp_status VARCHAR(20) DEFAULT 'no_response',  -- going, not_going, maybe, no_response
+    rsvp_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    notes TEXT,
+    UNIQUE(event_id, family_id)
+);
+
+-- Announcements table
+CREATE TABLE announcements (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    title VARCHAR(255) NOT NULL,
+    body TEXT NOT NULL,
+    priority VARCHAR(20) DEFAULT 'normal',  -- urgent, high, normal, low
+    channels VARCHAR(100),  -- email, sms, push (comma-separated)
+    sent_at TIMESTAMP,
+    created_by UUID REFERENCES families(id),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Announcement recipients (tracking who received what)
+CREATE TABLE announcement_recipients (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    announcement_id UUID REFERENCES announcements(id) ON DELETE CASCADE,
+    family_id UUID REFERENCES families(id) ON DELETE CASCADE,
+    channel VARCHAR(20),  -- email, sms, push
+    status VARCHAR(20) DEFAULT 'pending',  -- pending, sent, failed, delivered, opened
+    sent_at TIMESTAMP,
+    delivered_at TIMESTAMP,
+    opened_at TIMESTAMP,
+    error_message TEXT
+);
+
+-- Documents table (team handbook, waivers, meet info, etc.)
+CREATE TABLE documents (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    title VARCHAR(255) NOT NULL,
+    description TEXT,
+    category VARCHAR(50),  -- handbook, waiver, meet_info, schedule, other
+    file_name VARCHAR(255) NOT NULL,
+    file_path VARCHAR(500) NOT NULL,
+    file_size INTEGER,
+    mime_type VARCHAR(100),
+    uploaded_by UUID REFERENCES families(id),
+    upload_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    is_public BOOLEAN DEFAULT TRUE,  -- Public to all families or admin-only
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Admin users (coaches, team managers)
+CREATE TABLE admins (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    family_id UUID REFERENCES families(id) ON DELETE CASCADE,
+    role VARCHAR(50) NOT NULL,  -- super_admin, coach, treasurer, volunteer_coordinator
+    permissions TEXT,  -- JSON array of permissions
+    active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Indexes for performance
+CREATE INDEX idx_families_email ON families(email);
+CREATE INDEX idx_swimmers_family_id ON swimmers(family_id);
+CREATE INDEX idx_swimmers_name ON swimmers(last_name, first_name);
+CREATE INDEX idx_registrations_season ON registrations(season);
+CREATE INDEX idx_registrations_family_id ON registrations(family_id);
+CREATE INDEX idx_payments_family_id ON payments(family_id);
+CREATE INDEX idx_payments_stripe_id ON payments(stripe_payment_intent_id);
+CREATE INDEX idx_events_start_datetime ON events(start_datetime);
+CREATE INDEX idx_events_type ON events(event_type);
+CREATE INDEX idx_events_canceled ON events(canceled);
+CREATE INDEX idx_announcements_sent_at ON announcements(sent_at);
+
+-- Updated_at trigger function
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ language 'plpgsql';
+
+-- Apply updated_at trigger to relevant tables
+CREATE TRIGGER update_families_updated_at BEFORE UPDATE ON families
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_swimmers_updated_at BEFORE UPDATE ON swimmers
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_registrations_updated_at BEFORE UPDATE ON registrations
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_events_updated_at BEFORE UPDATE ON events
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+-- Sample data (for testing - remove in production)
+-- INSERT INTO families (parent_first_name, parent_last_name, email, phone, password_hash)
+-- VALUES ('Test', 'Parent', 'test@example.com', '555-1234', '$2b$10$...');
+
+EXPLANATION OF SCHEMA:
+
+families: Core account table, one per household
+swimmers: Individual swimmers linked to families (supports multiple kids)
+registrations: Season signup with payment tracking
+payments: All payment transactions, linked to Stripe
+events: Calendar system with recurring event support (RRULE)
+event_rsvps: Optional attendance tracking for non-practice events
+announcements: Communication system
+announcement_recipients: Delivery tracking for compliance
+documents: File management (waivers, handbooks, schedules)
+admins: Role-based access control for coaches/managers
+
+KEY FEATURES:
+- UUID primary keys (better for distributed systems, no sequence conflicts)
+- Cascading deletes (delete family = delete all related data)
+- Indexes on frequently queried columns
+- Timestamps for audit trails
+- Stripe integration fields
+- RRULE support for recurring calendar events
+- Multi-channel communication tracking
+
+QUERY EXAMPLES:
+
+-- Get all registered families for 2026 season
+SELECT f.*, r.payment_status, r.amount_due
+FROM families f
+JOIN registrations r ON f.id = r.family_id
+WHERE r.season = '2026'
+ORDER BY f.parent_last_name;
+
+-- Get unpaid families
+SELECT f.parent_first_name, f.parent_last_name, f.email, 
+       r.amount_due, r.amount_paid, (r.amount_due - r.amount_paid) AS balance
+FROM families f
+JOIN registrations r ON f.id = r.family_id
+WHERE r.payment_status != 'paid' AND r.season = '2026';
+
+-- Get upcoming events
+SELECT * FROM events
+WHERE start_datetime >= NOW()
+AND canceled = FALSE
+ORDER BY start_datetime
+LIMIT 10;
+
+-- Get all swimmers for a family
+SELECT s.* FROM swimmers s
+JOIN families f ON s.family_id = f.id
+WHERE f.email = 'parent@example.com';
+
+-- Communication delivery stats
+SELECT 
+    a.title,
+    COUNT(ar.id) AS total_sent,
+    COUNT(CASE WHEN ar.status = 'delivered' THEN 1 END) AS delivered,
+    COUNT(CASE WHEN ar.status = 'opened' THEN 1 END) AS opened
+FROM announcements a
+JOIN announcement_recipients ar ON a.id = ar.announcement_id
+GROUP BY a.id, a.title;
+
+================================================================================
+9. SECURITY HARDENING
+================================================================================
+
+SECURITY CHECKLIST:
+
+Server Level:
+☐ SSH key authentication only (no passwords)
+☐ Fail2ban configured for SSH brute force protection
+☐ UFW firewall enabled with minimal open ports
+☐ Automatic security updates enabled
+☐ Non-root user for all operations
+☐ Root login disabled
+☐ Strong passwords for all accounts
+☐ Sudo requires password
+
+Network Level:
+☐ DMZ VLAN isolation configured in UniFi
+☐ Firewall rules prevent DMZ → internal network
+☐ Only Management VLAN can SSH to DMZ
+☐ Cloudflare Tunnel (no exposed ports)
+☐ DDoS protection via Cloudflare
+☐ IDS/IPS enabled on UniFi
+
+Application Level:
+☐ Environment variables for secrets (not hardcoded)
+☐ .env file permissions 600 (read/write owner only)
+☐ Input validation on all forms
+☐ Parameterized SQL queries (prevent SQL injection)
+☐ CORS configured properly
+☐ Rate limiting on API endpoints
+☐ JWT tokens for authentication
+☐ Password hashing (bcrypt/argon2)
+☐ HTTPS only (enforced by Cloudflare)
+☐ Security headers (CSP, X-Frame-Options, etc.)
+☐ File upload restrictions (size, type)
+☐ Session timeout configured
+
+Database Level:
+☐ Strong database password
+☐ Database only accessible from localhost
+☐ Least privilege principle (application user != superuser)
+☐ Regular backups
+☐ Encrypted backups
+☐ SQL injection prevention (parameterized queries)
+
+Third-Party Services:
+☐ Stripe webhook signature verification
+☐ SendGrid API key scoped permissions
+☐ Twilio IP whitelisting if available
+☐ All API keys stored in environment variables
+☐ Test keys for development, production keys for prod
+
+AUTOMATIC SECURITY UPDATES:
+
+# Install unattended-upgrades
+sudo apt install -y unattended-upgrades
+
+# Configure
+sudo dpkg-reconfigure -plow unattended-upgrades
+
+# Edit config
+sudo nano /etc/apt/apt.conf.d/50unattended-upgrades
+
+Enable:
+Unattended-Upgrade::Automatic-Reboot "true";
+Unattended-Upgrade::Automatic-Reboot-Time "03:00";
+
+DOCKER SECURITY:
+
+# Don't run containers as root
+USER appuser  # in Dockerfile
+
+# Scan images for vulnerabilities
+docker scan tigersharks_api
+
+# Keep images updated
+docker compose pull
+docker compose up -d
+
+# Limit container resources
+docker compose config:
+  services:
+    api:
+      deploy:
+        resources:
+          limits:
+            cpus: '2'
+            memory: 2G
+
+POSTGRESQL SECURITY:
+
+# Create limited user for application
+docker exec -it tigersharks_db psql -U postgres
+
+CREATE USER tigersharks_app WITH PASSWORD 'strong_password';
+GRANT CONNECT ON DATABASE tigersharks TO tigersharks_app;
+GRANT USAGE ON SCHEMA public TO tigersharks_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO tigersharks_app;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO tigersharks_app;
+
+# Update .env to use tigersharks_app user instead of postgres
+
+PASSWORD HASHING (in Dart backend):
+
+Use bcrypt or argon2 for password hashing:
+
+import 'package:bcrypt/bcrypt.dart';
+
+// Hash password during registration
+String hashPassword(String password) {
+  return BCrypt.hashpw(password, BCrypt.gensalt());
+}
+
+// Verify password during login
+bool verifyPassword(String password, String hash) {
+  return BCrypt.checkpw(password, hash);
+}
+
+INPUT VALIDATION:
+
+// Example validation in Dart
+bool isValidEmail(String email) {
+  return RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(email);
+}
+
+bool isValidPhone(String phone) {
+  // Remove non-digits
+  String digits = phone.replaceAll(RegExp(r'[^\d]'), '');
+  return digits.length == 10;
+}
+
+String sanitizeInput(String input) {
+  // Remove potentially dangerous characters
+  return input.replaceAll(RegExp(r'[<>\"\'&]'), '');
+}
+
+STRIPE WEBHOOK VERIFICATION:
+
+// Verify Stripe webhook signatures
+import 'dart:convert';
+import 'package:crypto/crypto.dart';
+
+bool verifyStripeSignature(String payload, String signature, String secret) {
+  var parts = signature.split(',');
+  var timestamp = parts[0].split('=')[1];
+  var sig = parts[1].split('=')[1];
+  
+  var signedPayload = '$timestamp.$payload';
+  var expectedSig = Hmac(sha256, utf8.encode(secret))
+      .convert(utf8.encode(signedPayload))
+      .toString();
+  
+  return sig == expectedSig;
+}
+
+RATE LIMITING (in Nginx - already configured):
+
+limit_req_zone $binary_remote_addr zone=api_limit:10m rate=10r/s;
+limit_req_zone $binary_remote_addr zone=login_limit:10m rate=5r/m;
+
+SECURITY HEADERS (in Nginx - already configured):
+
+add_header X-Frame-Options "SAMEORIGIN" always;
+add_header X-Content-Type-Options "nosniff" always;
+add_header X-XSS-Protection "1; mode=block" always;
+add_header Referrer-Policy "no-referrer-when-downgrade" always;
+
+CONTENT SECURITY POLICY:
+
+# Add to Nginx config for extra protection
+add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://js.stripe.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https://api.stripe.com;" always;
+
+REGULAR SECURITY AUDITS:
+
+# Check for outdated packages
+docker exec tigersharks_api dart pub outdated
+
+# Check for security vulnerabilities
+docker scan tigersharks_api
+
+# Review logs for suspicious activity
+docker compose logs --tail=100 nginx | grep -i "error\|attack\|injection"
+
+# Check failed login attempts
+grep "Failed password" /var/log/auth.log
+
+# Monitor firewall blocks
+sudo ufw status verbose
+sudo fail2ban-client status sshd
+
+INCIDENT RESPONSE PLAN:
+
+If compromised:
+1. Immediately shut down affected container: docker compose stop api
+2. Review logs: docker compose logs api > incident_logs.txt
+3. Check database for unauthorized changes
+4. Rotate all API keys and secrets
+5. Force password resets for all users
+6. Restore from clean backup if needed
+7. Analyze how breach occurred
+8. Patch vulnerability
+9. Document incident
+
+COMPLIANCE CONSIDERATIONS:
+
+COPPA (Children's Online Privacy Protection Act):
+- Tiger Sharks serves minors under 13
+- Obtain parental consent for data collection
+- Don't collect more data than necessary
+- Secure storage of children's information
+- Parental access to child's data
+
+Data Retention:
+- Keep registration data for current + 1 past season
+- Payment records for 7 years (tax purposes)
+- Remove inactive accounts after 2 years
+- Provide data export/deletion on request
+
+Privacy Policy:
+- Clearly state what data is collected
+- How it's used (registration, communication, payment)
+- Who has access (coaches, admins)
+- How it's protected
+- How to request deletion
+
+================================================================================
+10. BACKUP STRATEGY
+================================================================================
+
+BACKUP REQUIREMENTS:
+
+What to backup:
+✓ PostgreSQL database (all tables)
+✓ Uploaded documents (if storing locally vs Nextcloud)
+✓ Environment variables (.env)
+✓ Docker configurations (docker-compose.yml)
+✓ Nginx configurations
+✓ SSL certificates (if not using Cloudflare)
+✓ Application code (should be in git)
+
+Backup frequency:
+- Database: Daily (automated)
+- Configurations: After any change (manual + git)
+- Full system: Weekly
+
+Retention:
+- Daily backups: Keep 7 days
+- Weekly backups: Keep 4 weeks
+- Monthly backups: Keep 12 months
+- Pre-season backup: Keep indefinitely
+
+Storage locations:
+1. Local (on server): Last 7 days
+2. Home Nextcloud (VLAN 20): 30 days
+3. Offsite (optional): Cloud storage for disaster recovery
+
+AUTOMATED DATABASE BACKUP SCRIPT:
+
+Create /opt/tigersharks/scripts/backup-db.sh:
+
+#!/bin/bash
+
+# Configuration
+BACKUP_DIR="/opt/tigersharks/backups"
+NEXTCLOUD_BACKUP="/path/to/nextcloud/backups/tigersharks"
+DB_CONTAINER="tigersharks_db"
+DB_NAME="tigersharks"
+DB_USER="tigersharks_user"
+DATE=$(date +%Y%m%d_%H%M%S)
+BACKUP_FILE="tigersharks_${DATE}.sql"
+DAYS_TO_KEEP=7
+
+# Create backup directory if it doesn't exist
+mkdir -p ${BACKUP_DIR}
+
+# Dump database
+echo "$(date): Starting database backup..."
+docker exec ${DB_CONTAINER} pg_dump -U ${DB_USER} ${DB_NAME} > ${BACKUP_DIR}/${BACKUP_FILE}
+
+# Check if backup was successful
+if [ $? -eq 0 ]; then
+    echo "$(date): Database backup successful: ${BACKUP_FILE}"
+    
+    # Compress backup
+    gzip ${BACKUP_DIR}/${BACKUP_FILE}
+    
+    # Encrypt backup (optional but recommended)
+    gpg --encrypt --recipient your@email.com ${BACKUP_DIR}/${BACKUP_FILE}.gz
+    
+    # Copy to Nextcloud (adjust path as needed)
+    if [ -d "${NEXTCLOUD_BACKUP}" ]; then
+        cp ${BACKUP_DIR}/${BACKUP_FILE}.gz.gpg ${NEXTCLOUD_BACKUP}/
+        echo "$(date): Backup copied to Nextcloud"
+    fi
+    
+    # Delete old backups (keep last 7 days locally)
+    find ${BACKUP_DIR} -name "tigersharks_*.sql.gz*" -mtime +${DAYS_TO_KEEP} -delete
+    echo "$(date): Old backups cleaned up"
+    
+else
+    echo "$(date): Database backup FAILED!" | mail -s "TigerSharks Backup Failed" your@email.com
+    exit 1
+fi
+
+echo "$(date): Backup process completed"
+
+# Make script executable
+chmod +x /opt/tigersharks/scripts/backup-db.sh
+
+SCHEDULE BACKUPS (cron):
+
+# Edit crontab
+crontab -e
+
+# Add daily backup at 2 AM
+0 2 * * * /opt/tigersharks/scripts/backup-db.sh >> /opt/tigersharks/logs/backup.log 2>&1
+
+# Weekly full backup on Sundays at 3 AM
+0 3 * * 0 /opt/tigersharks/scripts/full-backup.sh >> /opt/tigersharks/logs/backup.log 2>&1
+
+FULL SYSTEM BACKUP SCRIPT:
+
+Create /opt/tigersharks/scripts/full-backup.sh:
+
+#!/bin/bash
+
+BACKUP_DIR="/opt/tigersharks/backups/full"
+DATE=$(date +%Y%m%d_%H%M%S)
+BACKUP_NAME="tigersharks_full_${DATE}.tar.gz"
+
+mkdir -p ${BACKUP_DIR}
+
+echo "$(date): Starting full backup..."
+
+# Stop containers for consistent backup
+docker compose -f /opt/tigersharks/docker-compose.yml stop
+
+# Backup entire tigersharks directory (excluding backups and logs)
+tar -czf ${BACKUP_DIR}/${BACKUP_NAME} \
+    --exclude='/opt/tigersharks/backups' \
+    --exclude='/opt/tigersharks/logs' \
+    /opt/tigersharks
+
+# Restart containers
+docker compose -f /opt/tigersharks/docker-compose.yml start
+
+if [ $? -eq 0 ]; then
+    echo "$(date): Full backup successful: ${BACKUP_NAME}"
+    
+    # Keep only last 4 weekly backups
+    ls -t ${BACKUP_DIR}/tigersharks_full_*.tar.gz | tail -n +5 | xargs -r rm
+else
+    echo "$(date): Full backup FAILED!"
+    exit 1
+fi
+
+chmod +x /opt/tigersharks/scripts/full-backup.sh
+
+RESTORE PROCEDURES:
+
+DATABASE RESTORE:
+
+# Stop API container to prevent writes during restore
+docker compose stop api
+
+# Drop existing database (CAREFUL!)
+docker exec -it tigersharks_db psql -U postgres -c "DROP DATABASE tigersharks;"
+
+# Recreate database
+docker exec -it tigersharks_db psql -U postgres -c "CREATE DATABASE tigersharks;"
+
+# Restore from backup
+gunzip < /opt/tigersharks/backups/tigersharks_20260115_020000.sql.gz | \
+    docker exec -i tigersharks_db psql -U tigersharks_user -d tigersharks
+
+# Or if encrypted:
+gpg --decrypt /opt/tigersharks/backups/tigersharks_20260115_020000.sql.gz.gpg | \
+    gunzip | docker exec -i tigersharks_db psql -U tigersharks_user -d tigersharks
+
+# Restart API
+docker compose start api
+
+# Verify data
+docker exec -it tigersharks_db psql -U tigersharks_user -d tigersharks -c "SELECT COUNT(*) FROM families;"
+
+FULL SYSTEM RESTORE:
+
+# Stop all containers
+docker compose -f /opt/tigersharks/docker-compose.yml down
+
+# Remove existing directory (CAREFUL!)
+sudo rm -rf /opt/tigersharks
+
+# Extract backup
+sudo tar -xzf /opt/tigersharks/backups/full/tigersharks_full_20260112_030000.tar.gz -C /
+
+# Restore ownership
+sudo chown -R $USER:$USER /opt/tigersharks
+
+# Start containers
+cd /opt/tigersharks
+docker compose up -d
+
+BACKUP VERIFICATION:
+
+# Create verification script
+/opt/tigersharks/scripts/verify-backup.sh:
+
+#!/bin/bash
+
+LATEST_BACKUP=$(ls -t /opt/tigersharks/backups/tigersharks_*.sql.gz.gpg | head -1)
+
+if [ -z "$LATEST_BACKUP" ]; then
+    echo "ERROR: No backup found!"
+    exit 1
+fi
+
+echo "Verifying backup: $LATEST_BACKUP"
+
+# Decrypt and decompress to test integrity
+gpg --decrypt "$LATEST_BACKUP" 2>/dev/null | gunzip > /tmp/test_restore.sql
+
+if [ $? -eq 0 ]; then
+    echo "Backup integrity: OK"
+    
+    # Check file size (should be > 1KB for valid dump)
+    SIZE=$(stat -f%z /tmp/test_restore.sql 2>/dev/null || stat -c%s /tmp/test_restore.sql 2>/dev/null)
+    if [ $SIZE -gt 1024 ]; then
+        echo "Backup size: OK ($SIZE bytes)"
+    else
+        echo "WARNING: Backup seems too small ($SIZE bytes)"
+    fi
+    
+    rm /tmp/test_restore.sql
+    exit 0
+else
+    echo "ERROR: Backup verification failed!"
+    exit 1
+fi
+
+chmod +x /opt/tigersharks/scripts/verify-backup.sh
+
+# Run verification daily after backup
+0 2 * * * /opt/tigersharks/scripts/backup-db.sh && /opt/tigersharks/scripts/verify-backup.sh
+
+DISASTER RECOVERY PLAN:
+
+Scenario 1: Database corruption
+1. Stop API container
+2. Drop corrupted database
+3. Restore from most recent backup
+4. Verify data integrity
+5. Restart API container
+6. Test registration flow
+
+Scenario 2: Server hardware failure
+1. Provision new server or VM
+2. Install base OS and Docker
+3. Restore full system backup
+4. Update Cloudflare Tunnel config if needed
+5. Verify all services running
+6. Test critical functions
+
+Scenario 3: Complete data loss
+1. Check Nextcloud backup location
+2. Restore latest backup to new server
+3. Notify families of any data loss period
+4. Review backup procedures to prevent recurrence
+
+BACKUP TESTING SCHEDULE:
+
+Monthly: Restore test database from backup to verify integrity
+Quarterly: Full restore drill to new VM
+Pre-season: Complete system backup before registration opens
+Post-season: Archive season data before cleanup
+
+MONITORING BACKUPS:
+
+# Check last backup time
+ls -lh /opt/tigersharks/backups/ | head -5
+
+# Check backup log for errors
+tail -50 /opt/tigersharks/logs/backup.log
+
+# Email notification on backup failure (already in script)
+# Check email: your@email.com for "TigerSharks Backup Failed" alerts
+
+GPG KEY SETUP (for encrypted backups):
+
+# Generate GPG key
+gpg --full-generate-key
+# Select: RSA and RSA
+# Key size: 4096
+# Expiration: 0 (does not expire)
+# Name: TigerSharks Backup
+# Email: your@email.com
+
+# List keys
+gpg --list-keys
+
+# Export public key (for backup to other systems)
+gpg --export -a "your@email.com" > tigersharks-backup-public.key
+
+# Backup private key (KEEP SECURE!)
+gpg --export-secret-keys -a "your@email.com" > tigersharks-backup-private.key
+# Store this key in a secure location (password manager, safe)
+
+================================================================================
+11. MONITORING & MAINTENANCE
+================================================================================
+
+MONITORING OBJECTIVES:
+
+✓ Ensure website is accessible 24/7
+✓ Detect performance degradation
+✓ Identify security threats
+✓ Track resource usage
+✓ Monitor API errors
+✓ Database health
+✓ Backup success/failure
+✓ SSL certificate expiration
+
+UPTIME MONITORING (UptimeRobot - Free):
+
+Sign up: https://uptimerobot.com (Free tier: 50 monitors, 5-min intervals)
+
+Monitors to create:
+1. HTTP Monitor: https://swimcts.org (check every 5 minutes)
+2. HTTP Monitor: https://swimcts.org/api/health (API health check)
+3. Keyword Monitor: Check for "healthy" text on health endpoint
+
+Alert contacts:
+- Email: your@email.com
+- SMS: your_phone_number (if available on free tier)
+
+SYSTEM MONITORING (built-in tools):
+
+# Install monitoring tools
+sudo apt install -y htop iotop nethogs sysstat
+
+# System resource usage
+htop  # Interactive CPU/RAM viewer
+
+# Disk I/O
+sudo iotop
+
+# Network usage by process
+sudo nethogs
+
+# Historical stats
+sar -u 1 10  # CPU usage, 10 samples
+sar -r 1 10  # Memory usage
+sar -n DEV 1 10  # Network stats
+
+DOCKER MONITORING:
+
+# Container stats (real-time)
+docker stats
+
+# Detailed container stats
+docker stats --no-stream --format "table {{.Container}}\t{{.CPUPerc}}\t{{.MemUsage}}\t{{.NetIO}}"
+
+# Container logs
+docker compose logs -f --tail=100 api
+docker compose logs -f --tail=100 nginx
+docker compose logs -f --tail=100 postgres
+
+# Check container health
+docker compose ps
+
+LOG AGGREGATION:
+
+# Centralize logs
+/opt/tigersharks/logs/
+├── nginx/
+│   ├── access.log
+│   └── error.log
+├── api/
+│   └── app.log
+├── postgres/
+│   └── postgres.log
+└── backup.log
+
+# Rotate logs to prevent disk fill
+sudo nano /etc/logrotate.d/tigersharks
+
+/opt/tigersharks/logs/*/*.log {
+    daily
+    rotate 14
+    compress
+    delaycompress
+    notifempty
+    create 0640 root root
+    sharedscripts
+    postrotate
+        docker compose -f /opt/tigersharks/docker-compose.yml restart nginx
+    endscript
+}
+
+LOG ANALYSIS:
+
+# Check for errors in API logs
+grep -i error /opt/tigersharks/logs/api/app.log
+
+# Check Nginx errors
+grep -i error /opt/tigersharks/logs/nginx/error.log
+
+# Top 10 IP addresses
+awk '{print $1}' /opt/tigersharks/logs/nginx/access.log | sort | uniq -c | sort -nr | head -10
+
+# Top 10 requested URLs
+awk '{print $7}' /opt/tigersharks/logs/nginx/access.log | sort | uniq -c | sort -nr | head -10
+
+# 404 errors
+grep " 404 " /opt/tigersharks/logs/nginx/access.log
+
+# 500 errors (server errors - investigate!)
+grep " 500 " /opt/tigersharks/logs/nginx/access.log
+
+# Requests per hour
+awk '{print $4}' /opt/tigersharks/logs/nginx/access.log | cut -d: -f1-2 | sort | uniq -c
+
+DATABASE MONITORING:
+
+# Connect to database
+docker exec -it tigersharks_db psql -U tigersharks_user -d tigersharks
+
+# Check database size
+SELECT pg_size_pretty(pg_database_size('tigersharks'));
+
+# Table sizes
+SELECT 
+    schemaname,
+    tablename,
+    pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) AS size
+FROM pg_tables
+WHERE schemaname = 'public'
+ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC;
+
+# Active connections
+SELECT count(*) FROM pg_stat_activity;
+
+# Long-running queries
+SELECT pid, now() - pg_stat_activity.query_start AS duration, query 
+FROM pg_stat_activity 
+WHERE (now() - pg_stat_activity.query_start) > interval '5 minutes';
+
+# Slow queries (if logging enabled)
+# Edit postgresql.conf: log_min_duration_statement = 1000 (log queries > 1 second)
+docker exec tigersharks_db tail -f /var/lib/postgresql/data/pg_log/postgresql.log
+
+PERFORMANCE MONITORING:
+
+# API response times (from Nginx logs)
+awk '{print $NF}' /opt/tigersharks/logs/nginx/access.log | \
+    awk '{sum+=$1; count++} END {print "Avg response time:", sum/count, "seconds"}'
+
+# Slow API endpoints
+awk '{print $(NF-1), $NF}' /opt/tigersharks/logs/nginx/access.log | \
+    awk '{a[$1]+=$2; b[$1]++} END {for (i in a) print i, a[i]/b[i]}' | \
+    sort -k2 -nr | head -10
+
+# Database query performance
+# Enable query logging in PostgreSQL
+docker exec tigersharks_db psql -U postgres -c \
+    "ALTER SYSTEM SET log_min_duration_statement = 1000;"
+docker compose restart postgres
+
+ALERTING SCRIPT:
+
+Create /opt/tigersharks/scripts/health-check.sh:
+
+#!/bin/bash
+
+# Configuration
+API_URL="http://localhost:8080/health"
+ALERT_EMAIL="your@email.com"
+
+# Check API health
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" $API_URL)
+
+if [ "$HTTP_CODE" != "200" ]; then
+    echo "ALERT: API returned HTTP $HTTP_CODE" | \
+        mail -s "TigerSharks API Down" $ALERT_EMAIL
+    exit 1
+fi
+
+# Check disk space
+DISK_USAGE=$(df -h /opt/tigersharks | awk 'NR==2 {print $5}' | sed 's/%//')
+if [ "$DISK_USAGE" -gt 80 ]; then
+    echo "ALERT: Disk usage at ${DISK_USAGE}%" | \
+        mail -s "TigerSharks Disk Space Warning" $ALERT_EMAIL
+fi
+
+# Check database connection
+docker exec tigersharks_db pg_isready -U tigersharks_user > /dev/null 2>&1
+if [ $? -ne 0 ]; then
+    echo "ALERT: Database not responding" | \
+        mail -s "TigerSharks Database Down" $ALERT_EMAIL
+    exit 1
+fi
+
+# Check memory usage
+MEM_USAGE=$(free | grep Mem | awk '{print int($3/$2 * 100)}')
+if [ "$MEM_USAGE" -gt 90 ]; then
+    echo "ALERT: Memory usage at ${MEM_USAGE}%" | \
+        mail -s "TigerSharks Memory Warning" $ALERT_EMAIL
+fi
+
+# All checks passed
+exit 0
+
+chmod +x /opt/tigersharks/scripts/health-check.sh
+
+# Run every 5 minutes
+*/5 * * * * /opt/tigersharks/scripts/health-check.sh
+
+MAINTENANCE TASKS:
+
+Daily:
+- Check backup logs
+- Review error logs
+- Monitor resource usage
+
+Weekly:
+- Update Docker images: docker compose pull && docker compose up -d
+- Review UptimeRobot reports
+- Check disk space
+- Analyze traffic patterns
+
+Monthly:
+- System updates: sudo apt update && sudo apt upgrade
+- Review and clean old logs
+- Database vacuum: docker exec tigersharks_db psql -U postgres -c "VACUUM ANALYZE;"
+- Test backup restore
+- Review security logs
+
+Quarterly:
+- Review firewall rules
+- Update SSL certificates (if self-managed)
+- Full system backup test
+- Performance optimization review
+
+Pre-Season (before registration):
+- Full system backup
+- Load testing
+- Database optimization
+- Clear old season data
+
+Post-Season:
+- Archive season data
+- Remove inactive accounts
+- Review season analytics
+- Plan improvements
+
+UPDATE PROCEDURES:
+
+# Update system packages
+sudo apt update
+sudo apt upgrade -y
+
+# Update Docker images
+cd /opt/tigersharks
+docker compose pull
+docker compose up -d
+
+# Update application code
+git pull origin main
+docker compose up -d --build
+
+# Database migrations (if needed)
+docker exec -i tigersharks_db psql -U tigersharks_user -d tigersharks < migrations/002_add_new_feature.sql
+
+UNIFI NETWORK MONITORING:
+
+UniFi Controller → Insights:
+- Check DMZ VLAN 30 traffic patterns
+- Monitor for unusual spikes
+- Review DPI data for threats
+- Check IDS/IPS alerts
+
+UniFi Controller → Events:
+- Review firewall blocks
+- Check for unauthorized access attempts
+- Monitor Cloudflare Tunnel connectivity
+
+DASHBOARD CREATION (optional):
+
+Simple monitoring dashboard using HTML + JavaScript:
+
+Create /opt/tigersharks/frontend/admin-dashboard.html:
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>TigerSharks Monitoring</title>
+    <script>
+        async function checkHealth() {
+            const response = await fetch('/api/health');
+            const status = document.getElementById('api-status');
+            if (response.ok) {
+                status.textContent = 'Healthy ✓';
+                status.style.color = 'green';
+            } else {
+                status.textContent = 'Error ✗';
+                status.style.color = 'red';
+            }
+        }
+        
+        setInterval(checkHealth, 30000);  // Check every 30 seconds
+        checkHealth();  // Initial check
+    </script>
+</head>
+<body>
+    <h1>TigerSharks System Status</h1>
+    <p>API Status: <span id="api-status">Checking...</span></p>
+    <p>Last Updated: <span id="timestamp"></span></p>
+    
+    <script>
+        document.getElementById('timestamp').textContent = new Date().toLocaleString();
+        setInterval(() => {
+            document.getElementById('timestamp').textContent = new Date().toLocaleString();
+        }, 1000);
+    </script>
+</body>
+</html>
+
+Access at: https://swimcts.org/admin-dashboard.html
+
+PERFORMANCE OPTIMIZATION:
+
+Database indexing (already in schema):
+- Indexes on frequently queried columns
+- Composite indexes for common joins
+
+Nginx caching:
+- Static assets cached for 1 year
+- HTML not cached (for updates)
+
+API caching with Redis:
+- Cache frequently accessed data (calendar events, user profiles)
+- TTL of 5-10 minutes
+
+Database query optimization:
+- Use EXPLAIN ANALYZE for slow queries
+- Add indexes as needed
+- Avoid N+1 query problems
+
+Flutter Web optimization:
+- flutter build web --release (production build)
+- Minification enabled
+- Tree shaking for smaller bundle size
+
+================================================================================
+12. DEPLOYMENT CHECKLIST
+================================================================================
+
+PRE-DEPLOYMENT:
+
+Infrastructure:
+☐ DMZ VLAN 30 created in UniFi
+☐ Firewall rules configured and tested
+☐ Server/VM provisioned with correct specs
+☐ Static IP assigned (192.168.30.10)
+☐ SSH key authentication configured
+☐ Fail2ban installed and configured
+☐ UFW firewall enabled
+
+Domain & DNS:
+☐ swimcts.org registered
+☐ DNS using Cloudflare nameservers
+☐ Cloudflare account created
+☐ Domain verified in Cloudflare
+
+Third-Party Services:
+☐ Stripe account created (test mode)
+☐ Stripe API keys obtained
+☐ Stripe webhook endpoint configured
+☐ SendGrid account created
+☐ SendGrid API key obtained
+☐ SendGrid sender verified
+☐ Twilio account created (optional for SMS)
+☐ Twilio credentials obtained
+
+Software Installation:
+☐ Base OS installed (Debian 12 / Ubuntu 24.04)
+☐ System updated (apt update && upgrade)
+☐ Docker installed
+☐ Docker Compose installed
+☐ Git installed
+☐ Essential tools installed (curl, wget, vim, htop)
+
+DEPLOYMENT STEPS:
+
+1. Clone/Copy Application Code:
+☐ Create /opt/tigersharks directory
+☐ Copy Flutter frontend build
+☐ Copy Dart backend code
+☐ Copy docker-compose.yml
+☐ Copy nginx.conf
+☐ Copy init.sql
+
+2. Configuration:
+☐ Create .env file with all secrets
+☐ Set correct permissions on .env (chmod 600)
+☐ Update API keys in .env
+☐ Configure Nginx for your domain
+☐ Review docker-compose.yml settings
+
+3. Database Setup:
+☐ Start PostgreSQL container
+☐ Verify database created
+☐ Run init.sql to create schema
+☐ Create application user with limited permissions
+☐ Test database connection
+
+4. Application Deployment:
+☐ Build Docker images: docker compose build
+☐ Start all services: docker compose up -d
+☐ Check container status: docker compose ps
+☐ Verify all containers healthy
+
+5. Cloudflare Tunnel:
+☐ Install cloudflared
+☐ Authenticate with Cloudflare
+☐ Create tunnel: cloudflared tunnel create tigersharks
+☐ Configure tunnel (config.yml)
+☐ Route DNS to tunnel
+☐ Install as systemd service
+☐ Start and enable service
+☐ Verify tunnel status
+
+6. Testing:
+☐ Test API health: curl http://localhost:8080/health
+☐ Test Nginx: curl http://localhost/health
+☐ Test from internet: curl https://swimcts.org
+☐ Test registration flow (end-to-end)
+☐ Test Stripe payment (test mode)
+☐ Test email sending (SendGrid)
+☐ Test SMS (Twilio, if using)
+☐ Test calendar display
+☐ Test admin dashboard
+
+7. Security Hardening:
+☐ Verify firewall rules in UniFi
+☐ Test DMZ isolation (ping from DMZ to internal network should fail)
+☐ Enable fail2ban
+☐ Configure rate limiting in Nginx
+☐ Set up SSL (Cloudflare handles this)
+☐ Review security headers
+☐ Test HTTPS enforcement
+
+8. Monitoring Setup:
+☐ Configure UptimeRobot monitors
+☐ Set up email alerts
+☐ Create health check script
+☐ Schedule health check cron job
+☐ Configure log rotation
+☐ Test backup script
+☐ Schedule automated backups
+
+9. Documentation:
+☐ Document all passwords (store in password manager)
+☐ Document server IP addresses
+☐ Document Cloudflare tunnel ID
+☐ Create runbook for common tasks
+☐ Document restore procedures
+
+10. Go Live:
+☐ Announce to team (coaches, admins)
+☐ Soft launch to test users
+☐ Monitor for issues first 24 hours
+☐ Full launch to all families
+☐ Cancel Team Unify subscription (after 30 days of stable operation)
+
+POST-DEPLOYMENT:
+
+Week 1:
+☐ Monitor uptime daily
+☐ Review error logs daily
+☐ Check resource usage
+☐ Gather user feedback
+☐ Fix any critical bugs
+
+Week 2-4:
+☐ Optimize based on usage patterns
+☐ Add requested features
+☐ Improve documentation
+☐ Train additional admins
+
+Month 2+:
+☐ Establish maintenance routine
+☐ Review and optimize costs
+☐ Plan feature roadmap
+☐ Consider mobile app development
+
+ROLLBACK PLAN:
+
+If critical issues arise:
+1. Keep Team Unify active for 30 days as fallback
+2. Can revert DNS in Cloudflare (5 minutes)
+3. Have backup of all data
+4. Communicate transparently with families
+5. Fix issues, relaunch when ready
+
+SUCCESS CRITERIA:
+
+☐ 99%+ uptime (verified by UptimeRobot)
+☐ Registration working smoothly
+☐ Payments processing correctly
+☐ Email/SMS notifications reliable
+☐ Calendar displaying properly
+☐ Positive feedback from families
+☐ No critical security issues
+☐ Backups running successfully
+☐ Cost savings realized ($1,750/year)
+
+================================================================================
+13. TROUBLESHOOTING GUIDE
+================================================================================
+
+COMMON ISSUES AND SOLUTIONS:
+
+ISSUE: Website not accessible from internet
+Symptoms: Can access localhost, but not swimcts.org externally
+Diagnosis:
+1. Check Cloudflare Tunnel status:
+   sudo systemctl status cloudflared
+   sudo journalctl -u cloudflared -f
+2. Verify DNS records in Cloudflare dashboard
+3. Check Nginx is running: docker compose ps nginx
+Solutions:
+- Restart cloudflared: sudo systemctl restart cloudflared
+- Verify tunnel config: cat /etc/cloudflared/config.yml
+- Check tunnel status: cloudflared tunnel info tigersharks
+- Ensure Nginx listening on port 80: netstat -tlnp | grep :80
+
+ISSUE: 502 Bad Gateway
+Symptoms: Nginx returns 502 error
+Diagnosis:
+1. Check if API container is running: docker compose ps api
+2. Check API logs: docker compose logs api
+3. Verify API is listening: curl http://localhost:8080/health
+Solutions:
+- Restart API: docker compose restart api
+- Check API logs for startup errors
+- Verify database connection (API can't start if DB is down)
+- Check environment variables in .env
+
+ISSUE: Database connection failed
+Symptoms: API logs show "could not connect to database"
+Diagnosis:
+1. Check if PostgreSQL is running: docker compose ps postgres
+2. Test connection: docker exec tigersharks_db pg_isready -U tigersharks_user
+3. Check PostgreSQL logs: docker compose logs postgres
+Solutions:
+- Restart PostgreSQL: docker compose restart postgres
+- Verify DATABASE_URL in .env is correct
+- Check PostgreSQL accepts connections: docker exec tigersharks_db psql -U tigersharks_user -d tigersharks -c "SELECT 1;"
+- Check network connectivity between containers
+
+ISSUE: Stripe payments failing
+Symptoms: Payment form loads but transactions fail
+Diagnosis:
+1. Check Stripe API keys in .env (sk_test vs sk_live)
+2. Review API logs for Stripe errors
+3. Check Stripe dashboard for error details
+Solutions:
+- Verify STRIPE_SECRET_KEY is correct
+- Check webhook endpoint is reachable: https://swimcts.org/webhooks/stripe
+- Verify webhook signature verification is working
+- Test with Stripe test cards: 4242 4242 4242 4242
+
+ISSUE: Emails not sending
+Symptoms: Registration completes but no confirmation email
+Diagnosis:
+1. Check API logs for SendGrid errors
+2. Verify SENDGRID_API_KEY in .env
+3. Check SendGrid dashboard for delivery stats
+Solutions:
+- Verify sender email is verified in SendGrid
+- Check API key has "Mail Send" permissions
+- Review SendGrid bounce/block lists
+- Test with simple email: curl SendGrid API directly
+
+ISSUE: SMS not sending
+Symptoms: Twilio SMS alerts not delivered
+Diagnosis:
+1. Check Twilio credentials in .env
+2. Review API logs for Twilio errors
+3. Check Twilio console for error codes
+Solutions:
+- Verify TWILIO_ACCOUNT_SID and AUTH_TOKEN correct
+- Ensure phone numbers are in E.164 format (+15551234567)
+- Check Twilio account balance
+- Verify TWILIO_PHONE_NUMBER is active
+
+ISSUE: High CPU usage
+Symptoms: Server slow, containers using excessive CPU
+Diagnosis:
+1. Check which container: docker stats
+2. Review logs for errors or loops
+3. Check for inefficient queries
+Solutions:
+- Restart affected container: docker compose restart <service>
+- Review database queries (EXPLAIN ANALYZE)
+- Check for infinite loops in application code
+- Add indexes to database if needed
+- Scale resources (more CPU cores) if consistently high
+
+ISSUE: High memory usage
+Symptoms: Out of memory errors, containers killed
+Diagnosis:
+1. Check memory per container: docker stats
+2. Review PostgreSQL shared_buffers setting
+3. Check for memory leaks in application
+Solutions:
+- Increase VM RAM allocation
+- Optimize PostgreSQL config (reduce shared_buffers if too high)
+- Restart containers to clear memory: docker compose restart
+- Set memory limits in docker-compose.yml
+
+ISSUE: Disk space full
+Symptoms: Can't write files, database errors, backup failures
+Diagnosis:
+1. Check disk usage: df -h
+2. Find large files: du -sh /opt/tigersharks/* | sort -h
+3. Check Docker disk usage: docker system df
+Solutions:
+- Clean old logs: find /opt/tigersharks/logs -mtime +30 -delete
+- Remove old backups: find /opt/tigersharks/backups -mtime +30 -delete
+- Docker cleanup: docker system prune -a
+- Increase storage allocation (VM or partition)
+
+ISSUE: Slow page loads
+Symptoms: Website loads slowly, timeouts
+Diagnosis:
+1. Check network latency: ping swimcts.org
+2. Review Nginx access logs for response times
+3. Check database query performance
+4. Verify Cloudflare caching
+Solutions:
+- Enable Cloudflare caching for static assets
+- Add database indexes for slow queries
+- Optimize Flutter Web build: flutter build web --release
+- Use Redis caching for frequently accessed data
+- Check bandwidth (unlikely with 2.5 Gbps fiber)
+
+ISSUE: Calendar not displaying events
+Symptoms: Calendar page loads but events missing
+Diagnosis:
+1. Check API endpoint: curl http://localhost:8080/api/events
+2. Review database for events: docker exec -it tigersharks_db psql -U tigersharks_user -d tigersharks -c "SELECT * FROM events LIMIT 10;"
+3. Check browser console for JavaScript errors
+Solutions:
+- Verify API is returning data
+- Check CORS settings if requests blocked
+- Review Flutter Web build for errors
+- Verify database query is correct
+
+ISSUE: Backup failures
+Symptoms: Backup script reports errors, no recent backups
+Diagnosis:
+1. Check backup log: tail -50 /opt/tigersharks/logs/backup.log
+2. Test manual backup: /opt/tigersharks/scripts/backup-db.sh
+3. Check disk space: df -h
+Solutions:
+- Ensure backup directory writable
+- Check PostgreSQL container is running
+- Verify database credentials correct
+- Free up disk space if full
+- Check email delivery if alerts not received
+
+ISSUE: Firewall blocking legitimate traffic
+Symptoms: Can't access certain features, API calls failing
+Diagnosis:
+1. Check UFW status: sudo ufw status verbose
+2. Review UniFi firewall logs
+3. Check Nginx error logs for blocked requests
+Solutions:
+- Adjust UFW rules: sudo ufw allow from <IP> to any port <PORT>
+- Modify UniFi firewall rules to allow necessary traffic
+- Ensure DMZ can reach Internet (for Stripe, SendGrid, Twilio)
+- Check CloudFlare firewall rules
+
+ISSUE: SSL/TLS certificate errors
+Symptoms: Browser shows "not secure" warning
+Diagnosis:
+1. Check Cloudflare SSL/TLS mode (should be Full or Full Strict)
+2. Verify domain DNS points to Cloudflare
+3. Check certificate status in browser
+Solutions:
+- Ensure Cloudflare proxy enabled (orange cloud)
+- Wait for certificate provisioning (can take 24 hours)
+- Verify Nginx has valid certificate (if using Full Strict)
+- Check SSL/TLS settings in Cloudflare dashboard
+
+ISSUE: Can't SSH to server
+Symptoms: SSH connection refused or timeout
+Diagnosis:
+1. Check server is reachable: ping 192.168.30.10
+2. Verify SSH service: systemctl status sshd (if you have console access)
+3. Check firewall rules in UniFi
+Solutions:
+- Verify you're connecting from Management VLAN (firewall rules)
+- Check SSH is running on server
+- Verify SSH keys are correct
+- Use console access (VM console or physical access) to troubleshoot
+- Check UFW isn't blocking SSH: sudo ufw status
+
+ISSUE: Docker containers won't start
+Symptoms: docker compose up fails, containers in restart loop
+Diagnosis:
+1. Check logs: docker compose logs <service>
+2. Verify .env file exists and is correct
+3. Check for port conflicts: netstat -tlnp
+Solutions:
+- Fix errors shown in logs
+- Verify all environment variables set
+- Ensure no other service using same ports
+- Check Docker daemon: systemctl status docker
+- Rebuild images: docker compose build --no-cache
+
+EMERGENCY CONTACTS & RESOURCES:
+
+Infrastructure:
+- AT&T Fiber Support: 1-800-288-2020
+- Cloudflare Support: support.cloudflare.com
+- UniFi Community: community.ui.com
+
+Third-Party Services:
+- Stripe Support: support.stripe.com
+- SendGrid Support: support.sendgrid.com
+- Twilio Support: support.twilio.com
+
+Technical Resources:
+- Docker Documentation: docs.docker.com
+- PostgreSQL Docs: postgresql.org/docs
+- Nginx Docs: nginx.org/en/docs
+- Dart/Flutter: dart.dev, flutter.dev
+
+WHEN TO SEEK HELP:
+
+Call for help if:
+- Database corrupted and restore not working
+- Security breach suspected
+- Complete system failure
+- Data loss with no backup
+- Issue affecting families during critical period (registration)
+
+Where to get help:
+- Reddit: r/selfhosted, r/docker, r/sysadmin
+- Stack Overflow: stackoverflow.com
+- GitHub Issues (for specific packages)
+- Hire contractor on Upwork/Fiverr for urgent fixes
+
+PREVENTIVE MAINTENANCE:
+
+To avoid issues:
+- Keep backups current and tested
+- Monitor resource usage trends
+- Update software regularly
+- Review logs weekly
+- Test disaster recovery quarterly
+- Document all changes
+- Keep passwords/keys secure
+- Have spare hardware ready (if possible)
+
+================================================================================
+END OF GUIDE
+================================================================================
+
+This guide should provide comprehensive reference for building, deploying,
+and maintaining the Tiger Sharks web server. 
+
+Key points:
+- Home-hosted on DMZ VLAN for security and cost savings
+- Cloudflare Tunnel for easy access without port forwarding
+- Docker Compose for simple deployment and management
+- Complete feature set to replace Team Unify
+- ~$1,750/year savings
+- Full control and customization
+
+Good luck with the build! Remember to test thoroughly before going live,
+keep Team Unify as a backup initially, and don't hesitate to ask for help
+if you run into issues.
+
+================================================================================

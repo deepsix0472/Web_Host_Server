@@ -23,6 +23,7 @@ model User {
   accounts      Account[]
   sessions      Session[]
   teams         TeamMember[]
+  swimmers      Swimmer[]    // Parent of swimmers
   
   createdAt     DateTime     @default(now())
   updatedAt     DateTime     @updatedAt
@@ -36,6 +37,7 @@ model Team {
   sport       String?
   members     TeamMember[]
   events      Event[]
+  swimmers    Swimmer[]
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
 }
@@ -82,9 +84,40 @@ enum TeamRole {
 
 enum EventType {
   PRACTICE
-  GAME
+  MEET
   MEETING
   OTHER
+}
+
+enum SwimmerStatus {
+  ACTIVE
+  INACTIVE
+  PENDING
+}
+
+// Swimmer model for roster management
+model Swimmer {
+  id              String        @id @default(cuid())
+  firstName       String
+  lastName        String
+  email           String?
+  phone           String?
+  birthDate       DateTime
+  ageGroup        String
+  medicalNotes    String?
+  emergencyContact String?
+  emergencyPhone  String?
+  
+  // Relations
+  team            Team          @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  teamId          String
+  parent          User?         @relation(fields: [parentId], references: [id])
+  parentId        String?
+  
+  status          SwimmerStatus @default(ACTIVE)
+  
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
 }
 
 // NextAuth.js models

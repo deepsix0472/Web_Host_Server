@@ -76,7 +76,15 @@ export function middleware(request: NextRequest) {
 
     const ip = getClientIp(request)
     const config = getRateLimitConfig(pathname)
-    const key = `${ip}:${pathname.startsWith('/api/auth') ? 'auth' : pathname.startsWith('/api/') ? 'api' : 'default'}`
+
+    // Determine rate limit bucket based on path
+    let bucket = 'default'
+    if (pathname.startsWith('/api/auth')) {
+        bucket = 'auth'
+    } else if (pathname.startsWith('/api/')) {
+        bucket = 'api'
+    }
+    const key = `${ip}:${bucket}`
 
     const { allowed, remaining, resetIn } = checkRateLimit(key, config)
 

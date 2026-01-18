@@ -18,10 +18,10 @@ export default function AddSwimmerPage() {
     const [teams, setTeams] = useState<Team[]>([]);
 
     useEffect(() => {
-        // Fetch teams for the dropdown
-        fetch('/api/teams')
+        // Fetch rosters for the dropdown
+        fetch('/api/rosters')
             .then(res => res.json())
-            .then(data => setTeams(data))
+            .then(data => Array.isArray(data) ? setTeams(data) : setTeams([]))
             .catch(() => setTeams([]));
     }, []);
 

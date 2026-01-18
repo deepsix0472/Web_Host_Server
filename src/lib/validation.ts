@@ -4,7 +4,7 @@ import { z } from 'zod'
 export const swimmerCreateSchema = z.object({
     firstName: z.string().min(1, 'First name is required').max(100),
     lastName: z.string().min(1, 'Last name is required').max(100),
-    email: z.string().email().optional().nullable(),
+    email: z.email().optional().nullable(),
     phone: z.string().max(20).optional().nullable(),
     birthDate: z.string().refine((date) => !Number.isNaN(Date.parse(date)), {
         message: 'Invalid date format',
@@ -30,13 +30,13 @@ export const rosterUpdateSchema = rosterCreateSchema.partial()
 
 // ============ USER SCHEMAS ============
 export const userCreateSchema = z.object({
-    email: z.string().email(),
+    email: z.email(),
     password: z.string().min(8, 'Password must be at least 8 characters'),
     name: z.string().min(1).max(100).optional(),
 })
 
 export const loginSchema = z.object({
-    email: z.string().email(),
+    email: z.email(),
     password: z.string().min(1, 'Password is required'),
 })
 

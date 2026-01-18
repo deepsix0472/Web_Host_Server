@@ -143,7 +143,7 @@ export default function AddSwimmerPage() {
                     </div>
 
                     <div className="form-group">
-                        <label className="form-label" htmlFor="teamId">Team *</label>
+                        <label className="form-label" htmlFor="teamId">Roster *</label>
                         <select
                             id="teamId"
                             name="teamId"
@@ -151,7 +151,7 @@ export default function AddSwimmerPage() {
                             required
                             disabled={isLoading || teams.length === 0}
                         >
-                            <option value="">Select Team</option>
+                            <option value="">Select Roster</option>
                             {teams.map(team => (
                                 <option key={team.id} value={team.id}>{team.name}</option>
                             ))}

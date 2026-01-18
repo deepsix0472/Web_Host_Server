@@ -1,6 +1,7 @@
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { redirect } from "next/navigation";
+import { NextResponse } from "next/server";
 
 /**
  * Get the current authenticated user from the session
@@ -44,6 +45,46 @@ export async function requireRole(allowedRoles: string[]) {
         throw new Error("Forbidden: Insufficient permissions");
     }
     return user;
+}
+
+/**
+ * Check role for API routes - returns NextResponse if unauthorized
+ */
+export async function requireRoleApi(allowedRoles: string[]): Promise<
+    { authorized: true; user: NonNullable<Awaited<ReturnType<typeof getCurrentUser>>> } |
+    { authorized: false; response: NextResponse }
+> {
+    const user = await getCurrentUser();
+
+    if (!user) {
+        return {
+            authorized: false,
+            response: NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+        };
+    }
+
+    if (!allowedRoles.includes(user.role)) {
+        return {
+            authorized: false,
+            response: NextResponse.json({ error: 'Forbidden: Insufficient permissions' }, { status: 403 })
+        };
+    }
+
+    return { authorized: true, user };
+}
+
+/**
+ * Shorthand for ADMIN role check
+ */
+export async function requireAdmin() {
+    return requireRoleApi(['ADMIN']);
+}
+
+/**
+ * Shorthand for ADMIN or COACH role check
+ */
+export async function requireCoachOrAdmin() {
+    return requireRoleApi(['ADMIN', 'COACH']);
 }
 
 /**
